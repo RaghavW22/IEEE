@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #0A1628;
+  --color-navy-light: #112240;
+  --color-navy-dark: #060E1A;
+  --color-gold: #D4AF37;
+  --color-gold-light: #E8C84A;
+  --color-gold-dark: #B8960C;
+  --color-danger: #E74C3C;
+  --color-safe: #2ECC71;
+  --color-warning: #F39C12;
+
+  --font-inter: "Inter", sans-serif;
+  --font-playfair: "Playfair Display", serif;
+}
+
+body {
+  font-family: var(--font-inter);
+  background-color: var(--color-navy);
+  color: white;
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3 {
+  font-family: var(--font-playfair);
+}
+
+.hotel-bg {
+  background-image: url('/hotel-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+/* SOS pulse rings */
+@keyframes ring-pulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+
+.ring-animate-1 {
+  animation: ring-pulse 2s ease-out infinite;
+  animation-delay: 0s;
+}
+.ring-animate-2 {
+  animation: ring-pulse 2s ease-out infinite;
+  animation-delay: 0.5s;
+}
+.ring-animate-3 {
+  animation: ring-pulse 2s ease-out infinite;
+  animation-delay: 1s;
+}
+
+/* Emergency blink */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.blink-dot {
+  animation: blink 0.8s infinite;
+}
+
+/* Custom scrollbar */
+.custom-scroll::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.2);
+  border-radius: 2px;
+}
+
+/* Shimmer animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, #112240 25%, #1a3060 50%, #112240 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}

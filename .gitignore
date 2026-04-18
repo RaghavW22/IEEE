@@ -1,0 +1,14 @@
+node_modules/
+.vite/
+dist/
+build/
+.env
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+backend/safepath.db
+.pytest_cache/
+.coverage
+htmlcov/
