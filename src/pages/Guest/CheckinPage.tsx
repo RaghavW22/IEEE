@@ -20,11 +20,11 @@ const LANGUAGES = [
 
 const schema = z.object({
   name:       z.string().min(2, 'Name must be at least 2 characters'),
-  roomNumber: z.coerce.number().min(101, 'Rooms start from 101').max(310, 'Room must be ≤ 310'),
+  roomNumber: z.number().min(101, 'Rooms start from 101').max(310, 'Room must be ≤ 310'),
   language:   z.enum(LANGUAGES),
 });
 
-type FormData = z.infer<typeof schema>;
+type CheckinFormData = z.infer<typeof schema>;
 
 function getFloor(room: number) {
   if (room >= 100 && room <= 199) return 1;
@@ -55,21 +55,23 @@ export default function CheckinPage() {
     handleSubmit,
     watch,
     formState: { errors },
-  } = useForm<FormData>({
+  } = useForm<CheckinFormData>({
     resolver: zodResolver(schema),
     defaultValues: { language: 'English' },
   });
 
   const roomWatch = watch('roomNumber');
 
-  const onSubmit = async (data: FormData) => {
+  const onSubmit = async (data: CheckinFormData) => {
     setApiError('');
     setLoading(true);
     try {
-      const res = await api.checkin({
+      const res = await api.registerGuest({
         name:       data.name,
         roomNumber: data.roomNumber,
         language:   data.language,
+        email:      '',
+        mobile:     '',
       });
 
       const guest = res.guest;
@@ -78,7 +80,6 @@ export default function CheckinPage() {
         name:        guest.name,
         roomNumber:  guest.roomNumber,
         floor:       guest.floor,
-        phone:       '',
         language:    guest.language,
         checkedIn:   true,
       });
@@ -127,6 +128,7 @@ export default function CheckinPage() {
               <label className="text-white/50 text-xs mb-1 block">Room Number</label>
               <input
                 {...register('roomNumber', {
+                  valueAsNumber: true,
                   onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
                     const v = parseInt(e.target.value);
                     setDetectedFloor(isNaN(v) ? null : getFloor(v));

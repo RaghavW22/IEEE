@@ -47,7 +47,7 @@ export default function LandingPage() {
       desc: 'Register guests, generate QR codes, monitor alerts, manage danger zones and broadcast instructions.',
       buttonLabel: 'Staff Login',
       buttonVariant: 'ghost' as const,
-      action: () => navigate('/staff'),
+      action: () => navigate('/staff-login'),
     },
     {
       key: 'responder',

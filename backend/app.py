@@ -10,6 +10,15 @@ import sqlite3
 from datetime import datetime
 import os
 import uuid
+from deep_translator import GoogleTranslator
+import google.generativeai as genai
+from dotenv import load_dotenv
+
+load_dotenv()
+
+GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
 
 app = Flask(__name__)
 CORS(app)
@@ -40,6 +49,7 @@ def init_db():
                 language            TEXT    NOT NULL DEFAULT 'English',
                 email               TEXT    NOT NULL DEFAULT '',
                 mobile              TEXT    NOT NULL DEFAULT '',
+                guests_count        INTEGER DEFAULT 1,
                 qr_token            TEXT    UNIQUE,
                 checkin_datetime    TEXT    NOT NULL,
                 checkout_datetime   TEXT,
@@ -64,7 +74,20 @@ def init_db():
                 message             TEXT    NOT NULL,
                 timestamp           TEXT    NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS staff (
+                staff_id            TEXT    PRIMARY KEY,
+                name                TEXT    NOT NULL,
+                pin                 TEXT    NOT NULL,
+                role                TEXT    NOT NULL DEFAULT 'staff'
+            );
         ''')
+        
+        # Default staff
+        conn.execute(
+            'INSERT OR IGNORE INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)',
+            ('admin', 'Admin', 'admin123', 'admin')
+        )
         # Seed 10 rooms per floor
         for floor in [1, 2, 3]:
             for i in range(1, 11):
@@ -84,11 +107,19 @@ def migrate_db():
             conn.execute('ALTER TABLE checkins ADD COLUMN email TEXT NOT NULL DEFAULT ""')
         if 'mobile' not in cols:
             conn.execute('ALTER TABLE checkins ADD COLUMN mobile TEXT NOT NULL DEFAULT ""')
-        if 'qr_token' not in cols:
+        try:
             conn.execute('ALTER TABLE checkins ADD COLUMN qr_token TEXT')
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute('ALTER TABLE checkins ADD COLUMN guests_count INTEGER DEFAULT 1')
+        except sqlite3.OperationalError:
+            pass
         
         conn.execute('CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, guest_name TEXT NOT NULL, room_number INTEGER NOT NULL, floor INTEGER NOT NULL, severity INTEGER NOT NULL, message TEXT NOT NULL, timestamp TEXT NOT NULL, status TEXT NOT NULL DEFAULT "active")')
         conn.execute('CREATE TABLE IF NOT EXISTS broadcasts (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, message TEXT NOT NULL, timestamp TEXT NOT NULL)')
+        conn.execute('CREATE TABLE IF NOT EXISTS staff (staff_id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL, role TEXT NOT NULL DEFAULT "staff")')
+        conn.execute('INSERT OR IGNORE INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)', ('admin', 'Admin', 'admin123', 'admin'))
         conn.commit()
 
 
@@ -118,6 +149,7 @@ def register_guest():
     language    = str(data.get('language', 'English'))
     email       = str(data.get('email', '')).strip()
     mobile      = str(data.get('mobile', '')).strip()
+    guests_count = int(data.get('guestsCount', 1))
 
     if not name:
         return jsonify({'error': 'Guest name is required'}), 400
@@ -149,9 +181,9 @@ def register_guest():
 
         conn.execute('''
             INSERT INTO checkins
-                (guest_name, room_number, floor, language, email, mobile, qr_token, checkin_datetime, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
-        ''', (name, room_number, room['floor'], language, email, mobile, token, now))
+                (guest_name, room_number, floor, language, email, mobile, qr_token, checkin_datetime, status, guests_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+        ''', (name, room_number, room['floor'], language, email, mobile, token, now, guests_count))
         conn.execute(
             'UPDATE rooms SET status = "occupied" WHERE room_number = ?', (room_number,)
         )
@@ -171,6 +203,7 @@ def register_guest():
             'email':            email,
             'mobile':           mobile,
             'checkinDatetime':  now,
+            'guestsCount':      guests_count
         }
     }), 201
 
@@ -182,7 +215,7 @@ def guest_by_token(token):
     with get_db() as conn:
         row = conn.execute('''
             SELECT c.id, c.guest_name, c.room_number, c.floor, c.language,
-                   c.email, c.mobile, c.checkin_datetime, c.qr_token
+                   c.email, c.mobile, c.checkin_datetime, c.qr_token, c.guests_count
             FROM checkins c
             WHERE c.qr_token = ? AND c.status = 'active'
         ''', (token,)).fetchone()
@@ -233,13 +266,13 @@ def get_guests():
         if status_filter == 'all':
             rows = conn.execute('''
                 SELECT id, guest_name, room_number, floor, language,
-                       email, mobile, checkin_datetime, checkout_datetime, status
+                       email, mobile, checkin_datetime, checkout_datetime, status, qr_token, guests_count
                 FROM checkins ORDER BY checkin_datetime DESC
             ''').fetchall()
         else:
             rows = conn.execute('''
                 SELECT id, guest_name, room_number, floor, language,
-                       email, mobile, checkin_datetime, checkout_datetime, status
+                       email, mobile, checkin_datetime, checkout_datetime, status, qr_token, guests_count
                 FROM checkins WHERE status = ? ORDER BY checkin_datetime DESC
             ''', (status_filter,)).fetchall()
     return jsonify([dict(r) for r in rows])
@@ -279,8 +312,18 @@ def create_alert():
     guest_name = str(data.get('guestName', 'Unknown'))
     room_number = int(data.get('roomNumber', 0))
     floor = int(data.get('floor', 0))
-    severity = int(data.get('severity', 1))
     message = str(data.get('message', ''))
+    
+    severity = 1
+    if GEMINI_KEY:
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = f"Analyze the following emergency message and return a single integer severity score from 1 to 5 (1=low, 5=critical): '{message}'"
+            resp = model.generate_content(prompt)
+            severity = int(''.join(filter(str.isdigit, resp.text)))
+            severity = max(1, min(5, severity))
+        except Exception:
+            pass
     
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     
@@ -292,7 +335,7 @@ def create_alert():
         alert_id = cursor.lastrowid
         conn.commit()
     
-    return jsonify({'success': True, 'id': alert_id}), 201
+    return jsonify({'success': True, 'id': alert_id, 'severity': severity}), 201
 
 @app.route('/api/alerts/<int:alert_id>/acknowledge', methods=['POST'])
 def acknowledge_alert(alert_id):
@@ -301,13 +344,48 @@ def acknowledge_alert(alert_id):
         conn.commit()
     return jsonify({'success': True})
 
+@app.route('/api/alerts/resolve-by-room', methods=['POST'])
+def resolve_alerts_by_room():
+    data = request.get_json(force=True)
+    room_number = int(data.get('roomNumber', 0))
+    with get_db() as conn:
+        conn.execute('UPDATE alerts SET status = "acknowledged" WHERE room_number = ? AND status = "active"', (room_number,))
+        conn.commit()
+    return jsonify({'success': True})
+
 # ─── Broadcasts ───────────────────────────────────────────────────────────────
 
 @app.route('/api/broadcasts', methods=['GET'])
 def get_broadcasts():
+    lang = request.args.get('language')
     with get_db() as conn:
         rows = conn.execute('SELECT * FROM broadcasts ORDER BY timestamp DESC').fetchall()
-    return jsonify([dict(r) for r in rows])
+    
+    broadcasts = [dict(r) for r in rows]
+    
+    if lang and lang.lower() != 'english':
+        try:
+            translator = GoogleTranslator(source='auto', target=lang.lower())
+            for idx, b in enumerate(broadcasts):
+                broadcasts[idx]['message'] = translator.translate(b['message'])
+        except Exception:
+            pass
+
+    return jsonify(broadcasts)
+
+@app.route('/api/ai/suggest-broadcast', methods=['GET'])
+def ai_suggest_broadcast():
+    target = request.args.get('target', 'all')
+    if GEMINI_KEY:
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            prompt = f"Write a single sentence emergency broadcast announcement to guests in {target}. Keep it extremely concise, professional, and clear."
+            resp = model.generate_content(prompt)
+            suggestion = resp.text.strip().replace('"', '')
+            return jsonify({'suggestion': suggestion})
+        except Exception:
+            pass
+    return jsonify({'suggestion': f"Attention {target} guests. Please remain calm and proceed to the nearest emergency exit."})
 
 @app.route('/api/broadcasts', methods=['POST'])
 def create_broadcast():
@@ -348,6 +426,72 @@ def clear_trials():
         conn.commit()
     return jsonify({'success': True, 'message': 'All trial data cleared'})
 
+# ─── Staff Management ─────────────────────────────────────────────────────────
+
+@app.route('/api/staff/login', methods=['POST'])
+def login_staff():
+    data = request.get_json(force=True)
+    staff_id = str(data.get('staff_id', '')).strip()
+    pin = str(data.get('pin', '')).strip()
+
+    if not staff_id or not pin:
+        return jsonify({'error': 'Staff ID and PIN are required'}), 400
+
+    with get_db() as conn:
+        row = conn.execute(
+            'SELECT name, role FROM staff WHERE staff_id = ? AND pin = ?',
+            (staff_id, pin)
+        ).fetchone()
+
+    if not row:
+        return jsonify({'error': 'Invalid Staff ID or PIN'}), 401
+
+    return jsonify({'success': True, 'staff': dict(row)})
+
+
+@app.route('/api/staff', methods=['GET'])
+def get_staff_list():
+    with get_db() as conn:
+        rows = conn.execute('SELECT staff_id, name, role FROM staff').fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/staff', methods=['POST'])
+def add_staff():
+    data = request.get_json(force=True)
+    staff_id = str(data.get('staff_id', '')).strip()
+    name = str(data.get('name', '')).strip()
+    pin = str(data.get('pin', '')).strip()
+    role = str(data.get('role', 'staff')).strip()
+
+    if not staff_id or not name or not pin:
+        return jsonify({'error': 'Staff ID, Name, and PIN are required'}), 400
+
+    with get_db() as conn:
+        existing = conn.execute('SELECT staff_id FROM staff WHERE staff_id = ?', (staff_id,)).fetchone()
+        if existing:
+            return jsonify({'error': 'Staff ID already exists'}), 409
+        
+        conn.execute(
+            'INSERT INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)',
+            (staff_id, name, pin, role)
+        )
+        conn.commit()
+    return jsonify({'success': True, 'message': 'Staff added successfully'}), 201
+
+
+@app.route('/api/staff/<staff_id>', methods=['DELETE'])
+def delete_staff(staff_id):
+    if staff_id == 'admin':
+        return jsonify({'error': 'Cannot delete the default admin account'}), 403
+
+    with get_db() as conn:
+        cursor = conn.execute('DELETE FROM staff WHERE staff_id = ?', (staff_id,))
+        if cursor.rowcount == 0:
+             return jsonify({'error': 'Staff ID not found'}), 404
+        conn.commit()
+    return jsonify({'success': True, 'message': 'Staff deleted successfully'})
+
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -359,8 +503,8 @@ def send_checkin_notifications(guest_name, room, base_url, token, email, mobile)
     login_url = f"{base_url}/guest-login?token={token}"
 
     def send_real_email():
-        my_email = "raghavw2006@gmail.com"
-        my_app_password = "unzk mzpe zqsm rjxj".replace(" ", "")
+        my_email = os.environ.get("GMAIL_USER", "raghavw2006@gmail.com")
+        my_app_password = os.environ.get("GMAIL_APP_PASSWORD", "unzk mzpe zqsm rjxj").replace(" ", "")
 
         msg = MIMEMultipart('related')
         msg['From'] = my_email
@@ -443,5 +587,5 @@ def send_checkin_notifications(guest_name, room, base_url, token, email, mobile)
 if __name__ == '__main__':
     init_db()
     migrate_db()
-    print('SafePath backend: http://localhost:5000')
-    app.run(debug=True, port=5000)
+    print('SafePath backend: http://0.0.0.0:5000')
+    app.run(debug=True, port=5000, host='0.0.0.0')

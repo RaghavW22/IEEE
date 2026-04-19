@@ -17,11 +17,16 @@ export default function GuestDashboard() {
   const guestProfile     = useAppStore((s) => s.guestProfile);
   const dangerZones      = useAppStore((s) => s.dangerZones);
   const [apiBroadcasts, setApiBroadcasts] = useState<any[]>([]);
-
   const [sosActive,  setSosActive]  = useState(false);
   const [showModal,  setShowModal]  = useState(false);
   const [countdown,  setCountdown]  = useState(30);
   const [rooms,      setRooms]      = useState<RoomStatus[]>([]);
+  const [emergencyCategory, setEmergencyCategory] = useState<string>('Medical Emergency');
+
+  const EMERGENCY_OPTIONS = [
+    'Medical Emergency', 'Fire / Smoke', 'Active Intruder', 'Severe Water Leak',
+    'Gas Smell / Leak', 'Physical Altercation', 'Suspicious Package', 'Structural Issue'
+  ];
 
   useEffect(() => {
     if (!guestProfile) navigate('/checkin');
@@ -34,7 +39,7 @@ export default function GuestDashboard() {
 
   const fetchBroadcasts = useCallback(async () => {
     try { 
-      const data = await api.getBroadcasts();
+      const data = await api.getBroadcasts(guestProfile?.language);
       const relevant = data.filter((m: any) => 
         m.target === 'all' || 
         m.target === `floor${guestProfile?.floor}` || 
@@ -91,8 +96,9 @@ export default function GuestDashboard() {
         guestName: guestProfile.name,
         roomNumber: guestProfile.roomNumber,
         floor: guestProfile.floor,
-        severity: 5,
-        message: 'Guest triggered SOS panic button',
+        severity: 5, // Backend AI overrides this based on category now
+        message: emergencyCategory,
+        category: emergencyCategory,
       });
       toast.error('🚨 SOS sent! Staff have been notified.');
     } catch (e) {
@@ -137,6 +143,19 @@ export default function GuestDashboard() {
             <div className="flex flex-col items-center gap-5">
               <h2 className="font-playfair text-red-400 text-2xl font-bold">Emergency SOS</h2>
 
+              {!sosActive && (
+                <div className="w-full max-w-xs mb-2">
+                  <label className="text-white/50 text-xs mb-1 block">What is your emergency?</label>
+                  <select 
+                    value={emergencyCategory}
+                    onChange={(e) => setEmergencyCategory(e.target.value)}
+                    className="w-full bg-navy-light text-white p-2.5 rounded-lg border border-white/20 text-sm focus:outline-none focus:border-red-400"
+                  >
+                    {EMERGENCY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </div>
+              )}
+
               <div className="relative flex items-center justify-center">
                 {[0, 1, 2].map((i) => (
                   <div
@@ -164,7 +183,11 @@ export default function GuestDashboard() {
 
               {sosActive && (
                 <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
-                  <Button variant="safe" onClick={() => { setSosActive(false); toast.success("Glad you're safe!"); }}>
+                  <Button variant="safe" onClick={async () => {
+                    setSosActive(false);
+                    try { await api.resolveAlertsByRoom(guestProfile.roomNumber); } catch(e){}
+                    toast.success("Glad you're safe! Alert cleared."); 
+                  }}>
                     ✓ I'm Safe
                   </Button>
                 </motion.div>

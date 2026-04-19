@@ -37,6 +37,7 @@ export interface GuestRecord {
   mobile: string;
   checkin_datetime: string;
   checkout_datetime?: string;
+  qr_token: string;
   status: 'active' | 'checked_out';
 }
 
@@ -46,6 +47,7 @@ export interface RegisterGuestPayload {
   language: string;
   email: string;
   mobile: string;
+  guestsCount: number;
 }
 
 export interface RegisterGuestResponse {
@@ -105,6 +107,12 @@ export interface ApiBroadcast {
   timestamp: string;
 }
 
+export interface ApiStaff {
+  staff_id: string;
+  name: string;
+  role: string;
+}
+
 // ─── API calls ────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -138,7 +146,7 @@ export const api = {
   getAlerts: () =>
     apiFetch<ApiAlert[]>('/alerts'),
 
-  createAlert: (payload: { guestName: string; roomNumber: number; floor: number; severity: number; message: string }) =>
+  createAlert: (payload: { guestName: string; roomNumber: number; floor: number; severity: number; message: string; category?: string }) =>
     apiFetch<{ success: boolean; id: number }>('/alerts', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -147,8 +155,14 @@ export const api = {
   acknowledgeAlert: (id: number) =>
     apiFetch<{ success: boolean }>(`/alerts/${id}/acknowledge`, { method: 'POST' }),
 
-  getBroadcasts: () =>
-    apiFetch<ApiBroadcast[]>('/broadcasts'),
+  resolveAlertsByRoom: (roomNumber: number) =>
+    apiFetch<{ success: boolean }>('/alerts/resolve-by-room', {
+      method: 'POST',
+      body: JSON.stringify({ roomNumber })
+    }),
+
+  getBroadcasts: (language?: string) =>
+    apiFetch<ApiBroadcast[]>(`/broadcasts${language ? `?language=${encodeURIComponent(language)}` : ''}`),
 
   createBroadcast: (payload: { target: string; message: string }) =>
     apiFetch<{ success: boolean }>('/broadcasts', {
@@ -164,4 +178,23 @@ export const api = {
 
   clearTrials: () =>
     apiFetch<{ success: boolean; message: string }>('/clear-trials', { method: 'DELETE' }),
+
+  // ─── Staff Management ───
+  loginStaff: (staff_id: string, pin: string) =>
+    apiFetch<{ success: boolean; staff: ApiStaff }>('/staff/login', {
+      method: 'POST',
+      body: JSON.stringify({ staff_id, pin }),
+    }),
+
+  getStaff: () =>
+    apiFetch<ApiStaff[]>('/staff'),
+
+  addStaff: (payload: { staff_id: string; name: string; pin: string; role?: string }) =>
+    apiFetch<{ success: boolean; message: string }>('/staff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteStaff: (staff_id: string) =>
+    apiFetch<{ success: boolean; message: string }>(`/staff/${encodeURIComponent(staff_id)}`, { method: 'DELETE' }),
 };

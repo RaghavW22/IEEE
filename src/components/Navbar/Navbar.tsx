@@ -35,6 +35,8 @@ export default function Navbar({ role }: NavbarProps) {
               import('../../store/useAppStore').then(({ useAppStore }) => {
                 useAppStore.getState().logout();
               });
+              // Fallback synchronous navigation and clearing just in case
+              window.location.href = '/'; 
             }}
             className="text-white/60 hover:text-gold text-sm transition-colors flex items-center gap-1"
           >

@@ -4,7 +4,7 @@ import {
   BellRing, Map, Megaphone, BarChart2, Users,
   CheckCircle, Sparkles, LogOut, RefreshCw,
   UserPlus, Copy, ExternalLink, Download,
-  Mail, Phone, QrCode, Trash2
+  Mail, Phone, QrCode, Trash2, Shield
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import toast from 'react-hot-toast';
@@ -17,7 +17,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { api } from '../../api/client';
 import type { RoomStatus, GuestRecord, StatsResponse, RegisterGuestResponse, ApiAlert, ApiBroadcast } from '../../api/client';
 
-type Tab = 'register' | 'alerts' | 'map' | 'guests' | 'broadcast' | 'occupancy';
+type Tab = 'register' | 'alerts' | 'map' | 'guests' | 'broadcast' | 'occupancy' | 'staff';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const LANGUAGES = [
@@ -43,7 +43,7 @@ const INPUT = 'w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 te
 // ─── Register Guest Tab ───────────────────────────────────────────────────────
 function RegisterGuestTab() {
   const [form, setForm] = useState({
-    name: '', roomNumber: '', language: 'English' as string, email: '', mobile: '',
+    name: '', roomNumber: '', language: 'English' as string, email: '', mobile: '', guestsCount: 1,
   });
   const [loading,   setLoading]   = useState(false);
   const [errors,    setErrors]    = useState<Record<string, string>>({});
@@ -76,6 +76,7 @@ function RegisterGuestTab() {
         language:   form.language,
         email:      form.email.trim(),
         mobile:     form.mobile.trim(),
+        guestsCount: form.guestsCount,
       });
       const url = `${window.location.origin}/guest-login?token=${res.token}`;
       setQrUrl(url);
@@ -102,7 +103,7 @@ function RegisterGuestTab() {
   const resetForm = () => {
     setResult(null);
     setQrUrl('');
-    setForm({ name: '', roomNumber: '', language: 'English', email: '', mobile: '' });
+    setForm({ name: '', roomNumber: '', language: 'English', email: '', mobile: '', guestsCount: 1 });
     setErrors({});
   };
 
@@ -223,6 +224,19 @@ function RegisterGuestTab() {
                   />
                   {errors.mobile && <p className="text-red-400 text-xs mt-1">{errors.mobile}</p>}
                 </div>
+
+                {/* No of Guests */}
+                <div>
+                  <label className="text-white/50 text-xs mb-1 block">Number of Guests</label>
+                  <input
+                    value={form.guestsCount}
+                    onChange={(e) => setForm((p) => ({ ...p, guestsCount: Number(e.target.value) || 1 }))}
+                    type="number"
+                    min="1"
+                    max="10"
+                    className={INPUT}
+                  />
+                </div>
               </div>
 
               <div className="mt-5">
@@ -313,6 +327,7 @@ function RegisterGuestTab() {
                       ['Name',     result.guest.name],
                       ['Room',     `Room ${result.guest.roomNumber} · Floor ${result.guest.floor}`],
                       ['Language', result.guest.language],
+                      ['Guests',   String(form.guestsCount)],
                       ['Email',    result.guest.email],
                       ['Mobile',   result.guest.mobile],
                       ['Check-in', result.guest.checkinDatetime.replace('T', ' ')],
@@ -358,6 +373,7 @@ function GuestsTab() {
   const [showAll,     setShowAll]     = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [checkingOut, setCheckingOut] = useState<number | null>(null);
+  const [selectedGuestQR, setSelectedGuestQR] = useState<{name: string, url: string} | null>(null);
 
   const fetchGuests = useCallback(async () => {
     setLoading(true);
@@ -436,7 +452,21 @@ function GuestsTab() {
                     exit={{ opacity: 0 }}
                     className="border-b border-white/5 hover:bg-white/5 transition-colors"
                   >
-                    <td className="py-3 px-4 text-white font-semibold">{g.guest_name}</td>
+                    <td className="py-3 px-4 text-white font-semibold flex items-center gap-2">
+                        {g.guest_name}
+                        {g.qr_token && (
+                            <button 
+                                onClick={() => setSelectedGuestQR({
+                                    name: g.guest_name,
+                                    url: `${window.location.origin}/guest-login?token=${g.qr_token}`
+                                })}
+                                className="text-gold/60 hover:text-gold transition-colors"
+                                title="View Guest QR"
+                            >
+                                <QrCode size={14} />
+                            </button>
+                        )}
+                    </td>
                     <td className="py-3 px-4 text-gold font-bold">{g.room_number}</td>
                     <td className="py-3 px-4 text-white/60">{g.floor}</td>
                     <td className="py-3 px-4">
@@ -495,6 +525,42 @@ function GuestsTab() {
           </div>
         </div>
       )}
+
+      {/* QR Modal */}
+      <AnimatePresence>
+        {selectedGuestQR && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-navy/80 backdrop-blur-sm"
+            onClick={() => setSelectedGuestQR(null)}
+          >
+            <motion.div
+              initial={{ scale: 0.95 }}
+              animate={{ scale: 1 }}
+              exit={{ scale: 0.95 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-navy border border-white/20 rounded-2xl p-6 shadow-2xl flex flex-col items-center"
+            >
+              <h3 className="text-white text-lg font-playfair font-semibold mb-1">{selectedGuestQR.name}'s QR Code</h3>
+              <p className="text-white/50 text-xs mb-5">Scan to access the live guest emergency guide</p>
+              <div className="p-4 bg-white rounded-xl mb-5">
+                <QRCodeSVG
+                  value={selectedGuestQR.url}
+                  size={200}
+                  level="H"
+                  includeMargin={false}
+                  fgColor="#0A1628"
+                />
+              </div>
+              <Button variant="ghost" fullWidth onClick={() => setSelectedGuestQR(null)}>
+                Close
+              </Button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -538,6 +604,120 @@ function OccupancyTab({ stats }: { stats: StatsResponse | null }) {
   );
 }
 
+// ─── Staff Management Tab ────────────────────────────────────────────────────────────
+function StaffManagementTab() {
+  const [staffList, setStaffList] = useState<import('../../api/client').ApiStaff[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [newStaff, setNewStaff] = useState({ staff_id: '', name: '', pin: '' });
+
+  const fetchStaff = useCallback(async () => {
+    setLoading(true);
+    try { setStaffList(await api.getStaff()); }
+    catch (err) { toast.error('Failed to load staff list'); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchStaff(); }, [fetchStaff]);
+
+  const handleCreate = async () => {
+    if (!newStaff.staff_id.trim() || !newStaff.name.trim() || !newStaff.pin.trim()) {
+      toast.error('Please fill all fields');
+      return;
+    }
+    try {
+      await api.addStaff({ ...newStaff, staff_id: newStaff.staff_id.trim() });
+      toast.success('Staff added successfully');
+      setNewStaff({ staff_id: '', name: '', pin: '' });
+      fetchStaff();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add staff');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm(`Are you sure you want to remove staff ${id}?`)) return;
+    try {
+      await api.deleteStaff(id);
+      toast.success('Staff removed');
+      fetchStaff();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove staff');
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center gap-3">
+          <Shield size={22} className="text-gold" />
+          <h2 className="font-playfair text-white text-2xl font-semibold">Staff Registry</h2>
+        </div>
+        <button onClick={fetchStaff} className="text-white/40 hover:text-white transition-colors">
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <div className="overflow-x-auto rounded-xl border border-white/10">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-navy-light border-b border-white/10">
+                  <th className="py-3 px-4 text-left text-white/50 font-medium">Staff ID</th>
+                  <th className="py-3 px-4 text-left text-white/50 font-medium">Name</th>
+                  <th className="py-3 px-4 text-left text-white/50 font-medium">Role</th>
+                  <th className="py-3 px-4 text-right text-white/50 font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <AnimatePresence>
+                  {staffList.map((s) => (
+                    <motion.tr key={s.staff_id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="py-3 px-4 text-gold font-bold">{s.staff_id}</td>
+                      <td className="py-3 px-4 text-white font-medium">{s.name}</td>
+                      <td className="py-3 px-4 text-white/60 capitalize">{s.role}</td>
+                      <td className="py-3 px-4 text-right">
+                        {s.staff_id !== 'admin' && (
+                          <button onClick={() => handleDelete(s.staff_id)} className="text-red-400 hover:text-red-300 transition-colors" title="Remove Staff">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div>
+          <GlassCard>
+            <p className="text-white/50 text-sm mb-4">Add New Staff Member</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-white/50 text-xs mb-1 block">Staff ID</label>
+                <input value={newStaff.staff_id} onChange={(e) => setNewStaff(p => ({...p, staff_id: e.target.value}))} placeholder="e.g. SP-1234" className={INPUT} />
+              </div>
+              <div>
+                <label className="text-white/50 text-xs mb-1 block">Name</label>
+                <input value={newStaff.name} onChange={(e) => setNewStaff(p => ({...p, name: e.target.value}))} placeholder="e.g. John Doe" className={INPUT} />
+              </div>
+              <div>
+                <label className="text-white/50 text-xs mb-1 block">Security PIN</label>
+                <input value={newStaff.pin} onChange={(e) => setNewStaff(p => ({...p, pin: e.target.value}))} type="password" placeholder="••••" className={INPUT} />
+              </div>
+              <Button variant="gold" fullWidth onClick={handleCreate} className="mt-2 text-sm py-2" disabled={loading}>
+                Create Account
+              </Button>
+            </div>
+          </GlassCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('register');
@@ -545,6 +725,10 @@ export default function StaffDashboard() {
   const [broadcastText,   setBroadcastText]   = useState('');
   const [rooms,  setRooms]  = useState<RoomStatus[]>([]);
   const [stats,  setStats]  = useState<StatsResponse | null>(null);
+
+  const [isMuted, setIsMuted] = useState(false);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const oscRef = useRef<OscillatorNode | null>(null);
 
   const [alerts, setAlerts] = useState<ApiAlert[]>([]);
   const [broadcastMessages, setBroadcastMessages] = useState<ApiBroadcast[]>([]);
@@ -555,6 +739,61 @@ export default function StaffDashboard() {
 
   const activeAlerts   = alerts.filter((a) => a.status === 'active');
   const resolvedAlerts = alerts.filter((a) => a.status === 'acknowledged');
+
+  // Continuous SOS Alarm with mute support
+  const [lastAlertCount, setLastAlertCount] = useState(0);
+  
+  useEffect(() => {
+    if (activeAlerts.length > lastAlertCount) {
+      setIsMuted(false); // New alert arrives -> unmute
+    }
+    setLastAlertCount(activeAlerts.length);
+  }, [activeAlerts.length, lastAlertCount]);
+
+  useEffect(() => {
+    // Stop siren if muted or no alerts
+    if (activeAlerts.length === 0 || isMuted) {
+      if (oscRef.current) {
+        try {
+          oscRef.current.stop();
+          oscRef.current.disconnect();
+        } catch(e) {}
+        oscRef.current = null;
+      }
+      return;
+    }
+
+    // Play/continue siren
+    if (!oscRef.current) {
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!audioCtxRef.current) audioCtxRef.current = new AudioContextClass();
+        const ctx = audioCtxRef.current;
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        gain.gain.value = 0.1;
+
+        const interval = setInterval(() => {
+          if (!oscRef.current) return clearInterval(interval);
+          const freq = osc.frequency.value === 800 ? 1200 : 800;
+          osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        }, 300);
+
+        osc.start();
+        oscRef.current = osc;
+
+        return () => {
+          clearInterval(interval);
+        };
+      } catch(e) {}
+    }
+  }, [activeAlerts.length, isMuted]);
 
   const fetchRooms = useCallback(async () => {
     try { setRooms(await api.getRooms()); } catch { /* offline */ }
@@ -594,6 +833,7 @@ export default function StaffDashboard() {
     { id: 'guests',    label: 'Guest Registry', icon: <Users size={17} /> },
     { id: 'broadcast', label: 'Broadcast',      icon: <Megaphone size={17} /> },
     { id: 'occupancy', label: 'Occupancy',      icon: <BarChart2 size={17} /> },
+    { id: 'staff',     label: 'Staff Registry', icon: <Shield size={17} /> },
   ];
 
   return (
@@ -633,6 +873,7 @@ export default function StaffDashboard() {
         <div className="p-6">
 
           {activeTab === 'register' && <RegisterGuestTab />}
+          {activeTab === 'staff' && <StaffManagementTab />}
 
           {/* ── ALERTS ── */}
           {activeTab === 'alerts' && (
@@ -641,6 +882,14 @@ export default function StaffDashboard() {
                 <h2 className="font-playfair text-white text-2xl font-semibold">Active Alerts</h2>
                 {activeAlerts.length > 0 && (
                   <span className="bg-danger text-white text-xs font-bold px-2.5 py-1 rounded-full">{activeAlerts.length}</span>
+                )}
+                {activeAlerts.length > 0 && (
+                  <button 
+                     onClick={() => setIsMuted(!isMuted)} 
+                     className="ml-auto flex items-center gap-1.5 text-xs border border-white/20 rounded-lg px-3 py-1.5 text-white/70 hover:text-white transition-colors"
+                  >
+                     {isMuted ? '🔇 Unmute Siren' : '🔊 Mute Siren'}
+                  </button>
                 )}
               </div>
               {activeAlerts.length === 0 && (
@@ -746,7 +995,19 @@ export default function StaffDashboard() {
                         ))}
                       </select>
                     </div>
-                    <Button variant="ghost" onClick={() => setBroadcastText(BROADCAST_SUGGESTIONS[broadcastTarget] || 'Please pay attention to the following instructions.')}
+                    <Button variant="ghost" onClick={async () => {
+                      if (!broadcastTarget) return;
+                      const originalText = broadcastText;
+                      setBroadcastText('Generating suggestion...');
+                      try {
+                        const res = await fetch(`http://${window.location.hostname}:5000/api/ai/suggest-broadcast?target=${broadcastTarget}`);
+                        const data = await res.json();
+                        setBroadcastText(data.suggestion);
+                      } catch(e) {
+                         setBroadcastText(originalText || 'Please pay attention to the following instructions.');
+                         toast.error('Failed to get AI suggestion');
+                      }
+                    }}
                       className="flex items-center gap-1.5 whitespace-nowrap">
                       <Sparkles size={13} className="text-gold" /> AI Suggest
                     </Button>

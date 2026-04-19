@@ -4,6 +4,7 @@ import LandingPage      from './pages/Landing/LandingPage';
 import QRLoginPage      from './pages/Guest/QRLoginPage';
 import GuestDashboard   from './pages/Guest/GuestDashboard';
 import StaffDashboard   from './pages/Staff/StaffDashboard';
+import StaffLoginPage   from './pages/Staff/StaffLoginPage';
 import ResponderPortal  from './pages/Responder/ResponderPortal';
 
 export default function App() {
@@ -33,6 +34,7 @@ export default function App() {
         <Route path="/checkin"         element={<Navigate to="/guest-login" replace />} />
 
         {/* Staff & Responder */}
+        <Route path="/staff-login"     element={<StaffLoginPage />} />
         <Route path="/staff"           element={<StaffDashboard />} />
         <Route path="/staff-dashboard" element={<Navigate to="/staff" replace />} />
         <Route path="/responder"       element={<ResponderPortal />} />

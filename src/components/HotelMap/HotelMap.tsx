@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import type { RoomStatus } from '../../api/client';
 import type { DangerZone } from '../../types';
+import { useAppStore } from '../../store/useAppStore';
 
 // ─── SVG layout constants ────────────────────────────────────────────────────
 const VB_W = 900;
@@ -225,6 +226,7 @@ export default function HotelMap({
 }: HotelMapProps) {
   const [activeFloor, setActiveFloor] = useState(defaultFloor);
   const [selected, setSelected] = useState<SelectedInfo | null>(null);
+  const activeRole = useAppStore((s) => s.activeRole);
 
   const floor = FLOOR_DATA[activeFloor];
 
@@ -468,7 +470,7 @@ export default function HotelMap({
               >
                 {selected.sublabel}
               </span>
-              {selected.roomData?.guest_name && (
+              {activeRole === 'staff' && selected.roomData?.guest_name && (
                 <span className="text-white/60 text-xs">
                   Guest: {selected.roomData.guest_name} · {selected.roomData.language}
                 </span>
