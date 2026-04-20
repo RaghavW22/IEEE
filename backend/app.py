@@ -15,6 +15,13 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from firebase_helper import db_firestore, sync_alert_to_firebase, sync_checkin_to_firebase, sync_staff_to_firebase, delete_staff_from_firebase
 
+LANGUAGE_MAP = {
+    'hindi': 'hi', 'spanish': 'es', 'french': 'fr', 'arabic': 'ar',
+    'german': 'de', 'chinese': 'zh-CN', 'japanese': 'ja', 'russian': 'ru',
+    'portuguese': 'pt', 'italian': 'it', 'korean': 'ko', 'dutch': 'nl',
+    'turkish': 'tr', 'polish': 'pl'
+}
+
 load_dotenv()
 
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -468,12 +475,15 @@ def get_broadcasts():
     broadcasts = [dict(r) for r in rows]
     
     if lang and lang.lower() != 'english':
+        target_code = LANGUAGE_MAP.get(lang.lower(), lang.lower())
         try:
-            translator = GoogleTranslator(source='auto', target=lang.lower())
+            translator = GoogleTranslator(source='auto', target=target_code)
             for idx, b in enumerate(broadcasts):
-                broadcasts[idx]['message'] = translator.translate(b['message'])
-        except Exception:
-            pass
+                translated = translator.translate(b['message'])
+                if translated:
+                    broadcasts[idx]['message'] = translated
+        except Exception as e:
+            print(f"Translation Failure for {lang} ({target_code}): {e}")
 
     return jsonify(broadcasts)
 
