@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, CheckCircle, Megaphone, Volume2, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Megaphone, Volume2, X, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Layout from '../../components/Layout/Layout';
 import Navbar from '../../components/Navbar/Navbar';
@@ -12,7 +12,7 @@ import { useAppStore } from '../../store/useAppStore';
 import { api } from '../../api/client';
 import type { RoomStatus } from '../../api/client';
 import { db } from '../../firebase';
-import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, limit, where } from 'firebase/firestore';
 
 // Language name → BCP-47 code for SpeechSynthesis
 const LANG_CODE: Record<string, string> = {
@@ -22,46 +22,103 @@ const LANG_CODE: Record<string, string> = {
   Dutch: 'nl-NL', Turkish: 'tr-TR', Polish: 'pl-PL',
 };
 
-function speak(text: string, langName: string) {
+let speechQueue: { text: string; langName: string }[] = [];
+let isSpeaking = false;
+
+function processQueue() {
+  if (isSpeaking || speechQueue.length === 0) return;
+
+  const { text, langName } = speechQueue.shift()!;
   if (!window.speechSynthesis) return;
-  window.speechSynthesis.cancel();
+
+  isSpeaking = true;
+  window.speechSynthesis.cancel(); // Force stop any current (though queue should handle it)
+
   const utt = new SpeechSynthesisUtterance(text);
   utt.lang = LANG_CODE[langName] || 'en-US';
-  utt.rate = 0.9;
+  utt.rate = 0.95;
   utt.volume = 1;
-  // Try to pick a voice matching the language
-  const voices = window.speechSynthesis.getVoices();
-  const match = voices.find(v => v.lang.startsWith(utt.lang.slice(0, 2)));
-  if (match) utt.voice = match;
-  window.speechSynthesis.speak(utt);
+
+  const doSpeak = () => {
+    const voices = window.speechSynthesis.getVoices();
+    const match = voices.find(v => v.lang === utt.lang) ||
+      voices.find(v => v.lang.startsWith(utt.lang.slice(0, 2)));
+    if (match) utt.voice = match;
+
+    utt.onend = () => {
+      isSpeaking = false;
+      setTimeout(processQueue, 500); // Small pause between messages
+    };
+    utt.onerror = () => {
+      isSpeaking = false;
+      processQueue();
+    };
+
+    window.speechSynthesis.speak(utt);
+  };
+
+  if (window.speechSynthesis.getVoices().length === 0) {
+    window.speechSynthesis.onvoiceschanged = () => {
+      doSpeak();
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  } else {
+    doSpeak();
+  }
+}
+
+function playChime() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const ctx = new AudioContextClass();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+    osc.frequency.exponentialRampToValueAtTime(659.25, ctx.currentTime + 0.1); // E5
+    osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.2); // G5
+    gain.gain.setValueAtTime(0, ctx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.2, ctx.currentTime + 0.05);
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.5);
+  } catch (e) { }
+}
+
+function speak(text: string, langName: string) {
+  playChime();
+  speechQueue.push({ text, langName });
+  processQueue();
 }
 
 export default function GuestDashboard() {
-  const navigate         = useNavigate();
-  const guestProfile     = useAppStore((s) => s.guestProfile);
-  const dangerZones      = useAppStore((s) => s.dangerZones);
+  const navigate = useNavigate();
+  const guestProfile = useAppStore((s) => s.guestProfile);
+  const dangerZones = useAppStore((s) => s.dangerZones);
   const [apiBroadcasts, setApiBroadcasts] = useState<any[]>([]);
-  const [sosActive,  setSosActive]  = useState(false);
-  const [showModal,  setShowModal]  = useState(false);
-  const [countdown,  setCountdown]  = useState(30);
-  const [rooms,      setRooms]      = useState<RoomStatus[]>([]);
+  const [sosActive, setSosActive] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [countdown, setCountdown] = useState(30);
+  const [rooms, setRooms] = useState<RoomStatus[]>([]);
   const [emergencyCategory, setEmergencyCategory] = useState<string>('Medical Emergency');
-  const [customEmergency,   setCustomEmergency]   = useState<string>('');
+  const [customEmergency, setCustomEmergency] = useState<string>('');
   const spokenIds = useRef<Set<string>>(new Set());  // tracks already-spoken broadcast IDs
 
   // Predefined emergency options with pre-assigned severity levels
-  const EMERGENCY_OPTIONS: { label: string; severity: 1|2|3|4|5 }[] = [
-    { label: 'Medical Emergency',    severity: 4 },
-    { label: 'Fire / Smoke',         severity: 5 },
-    { label: 'Active Intruder',      severity: 5 },
-    { label: 'Severe Water Leak',    severity: 3 },
-    { label: 'Gas Smell / Leak',     severity: 4 },
+  const EMERGENCY_OPTIONS: { label: string; severity: 1 | 2 | 3 | 4 | 5 }[] = [
+    { label: 'Medical Emergency', severity: 4 },
+    { label: 'Fire / Smoke', severity: 5 },
+    { label: 'Active Intruder', severity: 5 },
+    { label: 'Severe Water Leak', severity: 3 },
+    { label: 'Gas Smell / Leak', severity: 4 },
     { label: 'Physical Altercation', severity: 4 },
-    { label: 'Suspicious Package',   severity: 3 },
-    { label: 'Structural Issue',     severity: 3 },
-    { label: 'Power Outage',         severity: 2 },
-    { label: 'Elevator Stuck',       severity: 2 },
-    { label: 'Other',                severity: 2 },
+    { label: 'Suspicious Package', severity: 3 },
+    { label: 'Structural Issue', severity: 3 },
+    { label: 'Power Outage', severity: 2 },
+    { label: 'Elevator Stuck', severity: 2 },
+    { label: 'Other', severity: 2 },
   ];
 
   const SEVERITY_COLORS: Record<number, string> = {
@@ -85,23 +142,32 @@ export default function GuestDashboard() {
   }, []);
 
   const fetchBroadcasts = useCallback(async () => {
-    try { 
+    try {
       const data = await api.getBroadcasts(guestProfile?.language);
-      const relevant = data.filter((m: any) => 
-        m.target === 'all' || 
-        m.target === `floor${guestProfile?.floor}` || 
+      const relevant = data.filter((m: any) =>
+        m.target === 'all' ||
+        m.target === `floor${guestProfile?.floor}` ||
         m.target === `room${guestProfile?.roomNumber}`
       );
       setApiBroadcasts(relevant);
 
-      // Speak any new broadcast the guest hasn't heard yet
+      // Only speak broadcasts that are NEW since this session started
+      // and NOT older than 2 minutes (avoids replay of old emergencies on refresh)
+      const nowMs = Date.now();
       relevant.forEach((msg: any) => {
         const id = msg.id || msg.timestamp + msg.message;
+        const msgTime = new Date(msg.timestamp).getTime();
+        const isRecent = nowMs - msgTime < 120000; // Last 2 minutes
+
         if (!spokenIds.current.has(id)) {
           spokenIds.current.add(id);
-          // Small delay so voices are loaded
-          setTimeout(() => speak(msg.message, guestProfile?.language || 'English'), 500);
-          toast(`📢 ${msg.message}`, { duration: 6000 });
+
+          // Only speak if this wasn't the very first fetch of old history during a cold session
+          // We allow some flexibility but basically don't want a wall of sound on refresh
+          if (isRecent) {
+            setTimeout(() => speak(msg.message, guestProfile?.language || 'English'), 500);
+            toast(`📢 ${msg.message}`, { duration: 6000 });
+          }
         }
       });
     } catch { /* offline */ }
@@ -109,20 +175,33 @@ export default function GuestDashboard() {
 
   useEffect(() => {
     fetchRooms();
-    
+
     // Polling for local rooms data (state machine)
     const rid = setInterval(fetchRooms, 3000);
 
-    // Real-time Firestore for Broadcasts
+    // Real-time Firestore for Broadcasts — we use it as a trigger to fetch translated versions from API
     const broadcastQuery = query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'), limit(10));
     const unsubBroadcasts = onSnapshot(broadcastQuery, () => {
-      // Whenever Firestore updates, we fetch the translated versions from our backend
       fetchBroadcasts();
     });
+
+    // SOS Status Sync: If ANY active alert exists for this room in Firestore, SOS is active here
+    let unsubSOS = () => { };
+    if (guestProfile?.roomNumber) {
+      const sosQuery = query(
+        collection(db, 'alerts'),
+        where('room_number', '==', Number(guestProfile.roomNumber)),
+        where('status', '==', 'active')
+      );
+      unsubSOS = onSnapshot(sosQuery, (snap) => {
+        setSosActive(!snap.empty);
+      });
+    }
 
     return () => {
       clearInterval(rid);
       unsubBroadcasts();
+      unsubSOS();
     };
   }, [fetchRooms, guestProfile]);
 
@@ -144,7 +223,7 @@ export default function GuestDashboard() {
     if (!guestProfile || rooms.length === 0) return;
     const myRoom = rooms.find((r) => r.room_number === guestProfile.roomNumber);
     if (!myRoom) return;
-    
+
     // If the room became available, or occupied by a different guest
     if (myRoom.status === 'available' || (myRoom.guest_name && myRoom.guest_name !== guestProfile.name)) {
       useAppStore.getState().logout();
@@ -153,7 +232,18 @@ export default function GuestDashboard() {
     }
   }, [rooms, guestProfile, navigate]);
 
-  if (!guestProfile) return null;
+  if (!guestProfile) {
+    return (
+      <Layout showBackground={true}>
+        <div className="flex-1 flex flex-col items-center justify-center gap-4">
+          <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}>
+            <Loader2 size={40} className="text-gold" />
+          </motion.div>
+          <p className="text-white/60 font-playfair animate-pulse text-lg">Redirecting to login…</p>
+        </div>
+      </Layout>
+    );
+  }
 
   const handleSOS = async () => {
     setSosActive(true);
@@ -252,9 +342,8 @@ export default function GuestDashboard() {
                 {[0, 1, 2].map((i) => (
                   <div
                     key={i}
-                    className={`absolute w-44 h-44 rounded-full border-2 border-danger/50 ${
-                      sosActive ? ['ring-animate-1', 'ring-animate-2', 'ring-animate-3'][i] : ''
-                    }`}
+                    className={`absolute w-44 h-44 rounded-full border-2 border-danger/50 ${sosActive ? ['ring-animate-1', 'ring-animate-2', 'ring-animate-3'][i] : ''
+                      }`}
                     style={{ pointerEvents: 'none' }}
                   />
                 ))}
@@ -262,9 +351,8 @@ export default function GuestDashboard() {
                   whileTap={{ scale: 0.93 }}
                   onClick={handleSOS}
                   disabled={sosActive}
-                  className={`relative w-44 h-44 rounded-full flex flex-col items-center justify-center gap-2 border-none shadow-2xl cursor-pointer transition-colors ${
-                    sosActive ? 'bg-red-800 animate-pulse' : 'bg-danger hover:bg-red-600'
-                  }`}
+                  className={`relative w-44 h-44 rounded-full flex flex-col items-center justify-center gap-2 border-none shadow-2xl cursor-pointer transition-colors ${sosActive ? 'bg-red-800 animate-pulse' : 'bg-danger hover:bg-red-600'
+                    }`}
                 >
                   <AlertTriangle size={40} className="text-white" />
                   <span className="text-white text-2xl font-bold">
@@ -277,8 +365,8 @@ export default function GuestDashboard() {
                 <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}>
                   <Button variant="safe" onClick={async () => {
                     setSosActive(false);
-                    try { await api.resolveAlertsByRoom(guestProfile.roomNumber); } catch(e){}
-                    toast.success("Glad you're safe! Alert cleared."); 
+                    try { await api.resolveAlertsByRoom(guestProfile.roomNumber); } catch (e) { }
+                    toast.success("Glad you're safe! Alert cleared.");
                   }}>
                     ✓ I'm Safe
                   </Button>
@@ -335,15 +423,13 @@ export default function GuestDashboard() {
               readOnly={true}
               sosActive={sosActive}
             />
-            <div className={`mt-3 p-3 rounded-xl border transition-all duration-500 ${
-              sosActive
+            <div className={`mt-3 p-3 rounded-xl border transition-all duration-500 ${sosActive
                 ? 'bg-red-900/30 border-red-500/60 animate-pulse'
                 : 'bg-white/5 border-white/10'
-            }`}>
+              }`}>
               <p className="text-white/70 text-sm font-medium flex items-center gap-2">
-                <span className={`w-4 h-1 rounded-full flex-shrink-0 ${
-                  sosActive ? 'bg-red-400' : 'bg-green-400 animate-pulse'
-                }`} />
+                <span className={`w-4 h-1 rounded-full flex-shrink-0 ${sosActive ? 'bg-red-400' : 'bg-green-400 animate-pulse'
+                  }`} />
                 {sosActive ? '🚨 Active Evacuation Route — Room ' : 'Live Evacuation Route — Room '}{guestProfile.roomNumber}
               </p>
               <p className="text-white/50 text-xs mt-2">

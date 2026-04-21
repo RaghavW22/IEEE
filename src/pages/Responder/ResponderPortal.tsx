@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { collection, query, orderBy, onSnapshot, where } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { motion } from 'framer-motion';
 import { Activity, Users, AlertOctagon, ScrollText, Clock } from 'lucide-react';
 import Navbar from '../../components/Navbar/Navbar';
@@ -63,10 +65,30 @@ export default function ResponderPortal() {
   }, [setActiveRole]);
 
   useEffect(() => {
-    fetchData();
-    const id = setInterval(fetchData, 5000);
-    return () => clearInterval(id);
-  }, [fetchData]);
+    fetchData(); // Initial full fetch
+    
+    // Real-time Firestore listeners for Responder
+    const alertsQuery = query(collection(db, 'alerts'), orderBy('timestamp', 'desc'));
+    const unsubAlerts = onSnapshot(alertsQuery, (snap) => {
+        setAlerts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+    });
+
+    const broadcastsQuery = query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'));
+    const unsubBroadcasts = onSnapshot(broadcastsQuery, (snap) => {
+        setBroadcasts(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+    });
+
+    const roomsQuery = query(collection(db, 'rooms'));
+    const unsubRooms = onSnapshot(roomsQuery, (snap) => {
+        setRooms(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+    });
+
+    return () => {
+      unsubAlerts();
+      unsubBroadcasts();
+      unsubRooms();
+    };
+  }, [fetchData, setActiveRole]);
 
   useEffect(() => {
     const id = setInterval(() => setLastUpdated((p) => p + 1), 1000);
@@ -94,34 +116,39 @@ export default function ResponderPortal() {
   const occupancyPct  = Math.round((totalOccupied / totalRooms) * 100) || 0;
 
   const priorityRooms = useMemo(() => {
-    return activeAlerts.slice().sort((a, b) => b.severity - a.severity || new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()).map(a => ({
-      roomNumber: a.room_number,
-      floor: a.floor,
-      severity: a.severity,
-      elapsedMinutes: Math.floor((Date.now() - new Date(a.timestamp).getTime()) / 60000),
-      status: 'unconfirmed'
-    }));
+    return activeAlerts
+      .slice()
+      .sort((a, b) => (Number(b.severity) - Number(a.severity)) || (new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()))
+      .map(a => ({
+        roomNumber: a.room_number,
+        floor: a.floor,
+        severity: a.severity,
+        elapsedMinutes: a.timestamp ? Math.floor((Date.now() - new Date(a.timestamp).getTime()) / 60000) : 0,
+        status: 'unconfirmed'
+      }));
   }, [activeAlerts]);
 
   const appEvents = useMemo(() => {
     const arr: any[] = [];
     alerts.forEach(a => {
+      const timeStr = a.timestamp?.includes('T') ? a.timestamp.split('T')[1].substring(0, 5) : '??:??';
       arr.push({
-        time: new Date(a.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-        timestamp: new Date(a.timestamp).getTime(),
-        text: `[Room ${a.room_number}] ${a.message}`,
+        time: timeStr,
+        timestamp: a.timestamp ? new Date(a.timestamp).getTime() : 0,
+        text: `[Room ${a.room_number}] SOS Level ${a.severity}: ${a.message}`,
         color: a.status === 'active' ? 'red' : 'green'
       });
     });
     broadcasts.forEach(b => {
+      const timeStr = b.timestamp?.includes('T') ? b.timestamp.split('T')[1].substring(0, 5) : '??:??';
       arr.push({
-        time: new Date(b.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-        timestamp: new Date(b.timestamp).getTime(),
+        time: timeStr,
+        timestamp: b.timestamp ? new Date(b.timestamp).getTime() : 0,
         text: `[Broadcast: ${b.target}] ${b.message}`,
         color: 'blue'
       });
     });
-    return arr.sort((x, y) => y.timestamp - x.timestamp);
+    return arr.sort((x, y) => (y.timestamp || 0) - (x.timestamp || 0));
   }, [alerts, broadcasts]);
 
   return (

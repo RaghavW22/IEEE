@@ -250,8 +250,15 @@ export default function HotelMap({
       const danger = getDangerLevel(roomNum);
       if (danger === 'danger') return ROOM_STYLE.danger;
       if (danger === 'warning') return ROOM_STYLE.warning;
+      
       const rd = roomMap.get(roomNum);
       if (!rd) return ROOM_STYLE.unknown;
+      
+      // PRIVACY: Guests shouldn't see if other rooms are occupied
+      if (activeRole === 'guest' && roomNum !== Number(guestRoomNum)) {
+         return ROOM_STYLE.available;
+      }
+      
       return rd.status === 'occupied' ? ROOM_STYLE.occupied : ROOM_STYLE.available;
     },
     [roomMap, getDangerLevel]

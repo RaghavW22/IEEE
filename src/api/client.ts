@@ -28,7 +28,7 @@ export interface RoomStatus {
 }
 
 export interface GuestRecord {
-  id: number;
+  id: string;
   guest_name: string;
   room_number: number;
   floor: number;
@@ -54,18 +54,18 @@ export interface RegisterGuestResponse {
   success: boolean;
   token: string;
   guest: {
-    name: string;
-    roomNumber: number;
+    guest_name: string;
+    room_number: number;
     floor: number;
     language: string;
     email: string;
     mobile: string;
-    checkinDatetime: string;
+    checkin_datetime: string;
   };
 }
 
 export interface GuestByTokenResponse {
-  id: number;
+  id: string;
   guest_name: string;
   room_number: number;
   floor: number;
@@ -90,7 +90,7 @@ export interface StatsResponse {
 }
 
 export interface ApiAlert {
-  id: number;
+  id: string;
   guest_name: string;
   room_number: number;
   floor: number;
@@ -101,7 +101,7 @@ export interface ApiAlert {
 }
 
 export interface ApiBroadcast {
-  id: number;
+  id: string;
   target: string;
   message: string;
   timestamp: string;
@@ -140,6 +140,9 @@ export const api = {
   getGuests: (status: 'active' | 'all' = 'active') =>
     apiFetch<GuestRecord[]>(`/guests?status=${status}`),
 
+  clearGuestHistory: () =>
+    apiFetch<{ success: boolean; count: number }>('/guests/history', { method: 'DELETE' }),
+
   getStats: () =>
     apiFetch<StatsResponse>('/stats'),
 
@@ -147,13 +150,25 @@ export const api = {
     apiFetch<ApiAlert[]>('/alerts'),
 
   createAlert: (payload: { guestName: string; roomNumber: number; floor: number; severity: number; message: string; category?: string }) =>
-    apiFetch<{ success: boolean; id: number }>('/alerts', {
+    apiFetch<{ success: boolean; id: string }>('/alerts', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
 
-  acknowledgeAlert: (id: number) =>
-    apiFetch<{ success: boolean }>(`/alerts/${id}/acknowledge`, { method: 'POST' }),
+  acknowledgeAlert: (id: string) =>
+    apiFetch<{ success: boolean }>(`/alerts/${id}`, { 
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'acknowledged' })
+    }),
+
+  clearResolvedAlerts: () =>
+    apiFetch<{ success: boolean; count: number }>('/alerts/resolved', { method: 'DELETE' }),
+
+  updateAlert: (id: string, payload: { severity?: number; status?: string }) =>
+    apiFetch<{ success: boolean }>(`/alerts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
 
   resolveAlertsByRoom: (roomNumber: number) =>
     apiFetch<{ success: boolean }>('/alerts/resolve-by-room', {
@@ -170,7 +185,7 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  deleteBroadcast: (id: number) =>
+  deleteBroadcast: (id: string) =>
     apiFetch<{ success: boolean }>(`/broadcasts/${id}`, { method: 'DELETE' }),
 
   clearAllBroadcasts: () =>

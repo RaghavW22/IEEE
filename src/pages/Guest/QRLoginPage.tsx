@@ -347,6 +347,10 @@ export default function QRLoginPage() {
                   <h2 className="font-playfair text-white text-2xl font-bold">
                     Welcome, {guestName}!
                   </h2>
+                  <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 flex flex-col items-center gap-0.5">
+                    <span className="text-[10px] text-white/30 uppercase tracking-widest font-bold">Your SafePath Access ID</span>
+                    <span className="text-gold text-xs font-mono select-all">{urlToken || manualToken}</span>
+                  </div>
                   <p className="text-white/50 text-sm mt-1">
                     Taking you to your dashboard…
                   </p>

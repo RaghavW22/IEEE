@@ -73,26 +73,15 @@ def sync_checkin_to_firebase(checkin_data):
     except Exception as e:
         print(f"Error syncing checkin to Firebase: {e}")
 
-def sync_staff_to_firebase(staff_data):
-    """Saves staff data to Firestore."""
+def sync_room_to_firebase(room_data):
+    """Saves room status to Firestore."""
     if not db_firestore:
         return
     try:
-        staff_copy = dict(staff_data)
-        # We don't want to sync the PIN to the cloud directly if possible, or at least keep it secure
-        # But for this system's staff console, we'll sync the ID, Name and Role.
-        db_firestore.collection('staff').document(str(staff_copy.get('staff_id'))).set(staff_copy)
+        room_copy = dict(room_data)
+        db_firestore.collection('rooms').document(str(room_copy.get('room_number'))).set(room_copy)
     except Exception as e:
-        print(f"Error syncing staff to Firebase: {e}")
-
-def delete_staff_from_firebase(staff_id):
-    """Deletes staff data from Firestore."""
-    if not db_firestore:
-        return
-    try:
-        db_firestore.collection('staff').document(str(staff_id)).delete()
-    except Exception as e:
-        print(f"Error deleting staff from Firebase: {e}")
+        print(f"Error syncing room to Firebase: {e}")
 
 def upload_file_to_storage(file_path, destination_name):
     """Uploads a file to Firebase Storage."""

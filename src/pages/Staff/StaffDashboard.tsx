@@ -21,7 +21,7 @@ import { collection, onSnapshot, query, orderBy, limit } from 'firebase/firestor
 
 type Tab = 'register' | 'alerts' | 'map' | 'guests' | 'broadcast' | 'occupancy' | 'staff';
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
+// ─── Constants & UI Helpers ───────────────────────────────────────────────────
 const LANGUAGES = [
   'English', 'Hindi', 'Spanish', 'French', 'Arabic',
   'German', 'Chinese', 'Japanese', 'Russian', 'Portuguese',
@@ -29,13 +29,13 @@ const LANGUAGES = [
 
 const SEV_BORDER: Record<number, string> = {
   1: 'border-l-green-500', 2: 'border-l-yellow-500', 3: 'border-l-orange-500',
-  4: 'border-l-red-500',   5: 'border-l-red-900',
+  4: 'border-l-red-500', 5: 'border-l-red-900',
 };
 const TARGET_LABELS: Record<string, string> = {
   all: 'All Guests', floor1: 'Floor 1', floor2: 'Floor 2', floor3: 'Floor 3',
 };
 const BROADCAST_SUGGESTIONS: Record<string, string> = {
-  all:    'Attention all guests: An emergency has been reported. Please follow exit signs and evacuate calmly.',
+  all: 'Attention all guests: An emergency has been reported. Please follow exit signs and evacuate calmly.',
   floor1: 'Floor 1 guests: Please evacuate immediately using Stairwell A or B. Avoid corridor near rooms 102–103.',
   floor2: 'Floor 2 guests: A precautionary evacuation is underway. Proceed calmly to the nearest stairwell.',
   floor3: 'Floor 3 guests: Please remain in your rooms until further instructions from staff.',
@@ -47,21 +47,21 @@ function RegisterGuestTab() {
   const [form, setForm] = useState({
     name: '', roomNumber: '', language: 'English' as string, email: '', mobile: '', guestsCount: 1,
   });
-  const [loading,   setLoading]   = useState(false);
-  const [errors,    setErrors]    = useState<Record<string, string>>({});
-  const [result,    setResult]    = useState<RegisterGuestResponse | null>(null);
-  const [qrUrl,     setQrUrl]     = useState('');
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [result, setResult] = useState<RegisterGuestResponse | null>(null);
+  const [qrUrl, setQrUrl] = useState('');
   const qrRef = useRef<SVGSVGElement>(null);
 
   const validate = () => {
     const e: Record<string, string> = {};
-    if (!form.name.trim())       e.name       = 'Guest name is required';
-    if (!form.roomNumber)        e.roomNumber  = 'Room number is required';
+    if (!form.name.trim()) e.name = 'Guest name is required';
+    if (!form.roomNumber) e.roomNumber = 'Room number is required';
     else if (Number(form.roomNumber) < 101 || Number(form.roomNumber) > 310)
-                                 e.roomNumber  = 'Room must be between 101 and 310';
-    if (!form.email.trim())      e.email       = 'Email is required';
+      e.roomNumber = 'Room must be between 101 and 310';
+    if (!form.email.trim()) e.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Invalid email address';
-    if (!form.mobile.trim())     e.mobile      = 'Mobile number is required';
+    if (!form.mobile.trim()) e.mobile = 'Mobile number is required';
     return e;
   };
 
@@ -73,17 +73,17 @@ function RegisterGuestTab() {
     setLoading(true);
     try {
       const res = await api.registerGuest({
-        name:       form.name.trim(),
+        name: form.name.trim(),
         roomNumber: Number(form.roomNumber),
-        language:   form.language,
-        email:      form.email.trim(),
-        mobile:     form.mobile.trim(),
+        language: form.language,
+        email: form.email.trim(),
+        mobile: form.mobile.trim(),
         guestsCount: form.guestsCount,
       });
       const url = `${window.location.origin}/guest-login?token=${res.token}`;
       setQrUrl(url);
       setResult(res);
-      toast.success(`QR code generated for ${res.guest.name}!`);
+      toast.success(`QR code generated for ${res.guest.guest_name}!`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -113,8 +113,8 @@ function RegisterGuestTab() {
     if (!qrRef.current) return;
     const svg = qrRef.current;
     const svgData = new XMLSerializer().serializeToString(svg);
-    const canvas  = document.createElement('canvas');
-    canvas.width  = 300;
+    const canvas = document.createElement('canvas');
+    canvas.width = 300;
     canvas.height = 300;
     const ctx = canvas.getContext('2d')!;
     const img = new Image();
@@ -122,9 +122,9 @@ function RegisterGuestTab() {
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, 300, 300);
       ctx.drawImage(img, 0, 0, 300, 300);
-      const a  = document.createElement('a');
-      a.href   = canvas.toDataURL('image/png');
-      a.download = `safepath-room${result?.guest.roomNumber ?? ''}.png`;
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `safepath-room${result?.guest.room_number ?? ''}.png`;
       a.click();
     };
     img.src = 'data:image/svg+xml;base64,' + btoa(svgData);
@@ -326,13 +326,13 @@ function RegisterGuestTab() {
                   <p className="text-white/40 text-xs uppercase tracking-wider mb-3">Guest Details</p>
                   <div className="space-y-2.5">
                     {[
-                      ['Name',     result.guest.name],
-                      ['Room',     `Room ${result.guest.roomNumber} · Floor ${result.guest.floor}`],
+                      ['Name', result.guest.guest_name],
+                      ['Room', `Room ${result.guest.room_number} · Floor ${result.guest.floor}`],
                       ['Language', result.guest.language],
-                      ['Guests',   String(form.guestsCount)],
-                      ['Email',    result.guest.email],
-                      ['Mobile',   result.guest.mobile],
-                      ['Check-in', result.guest.checkinDatetime.replace('T', ' ')],
+                      ['Guests', String(form.guestsCount)],
+                      ['Email', result.guest.email],
+                      ['Mobile', result.guest.mobile],
+                      ['Check-in', (result.guest.checkin_datetime || '').replace('T', ' ')],
                     ].map(([label, val]) => (
                       <div key={label} className="flex items-start gap-2">
                         <span className="text-white/40 text-xs w-16 flex-shrink-0 pt-0.5">{label}</span>
@@ -360,7 +360,11 @@ function RegisterGuestTab() {
             {/* Token display */}
             <div className="mt-4 bg-black/30 rounded-xl p-3 border border-white/10">
               <p className="text-white/30 text-xs mb-1">Guest login URL (scan to open)</p>
-              <p className="text-white/60 text-xs font-mono break-all">{qrUrl}</p>
+              <p className="text-white/60 text-xs font-mono break-all mb-3">{qrUrl}</p>
+              <div className="pt-3 border-t border-white/5 text-center">
+                <span className="text-white/30 text-[10px] uppercase font-bold block mb-1">Direct Login Token</span>
+                <span className="text-gold font-mono font-bold text-lg select-all">{result.token}</span>
+              </div>
             </div>
           </motion.div>
         )}
@@ -371,11 +375,11 @@ function RegisterGuestTab() {
 
 // ─── Guests Tab ───────────────────────────────────────────────────────────────
 function GuestsTab() {
-  const [guests,      setGuests]      = useState<GuestRecord[]>([]);
-  const [showAll,     setShowAll]     = useState(false);
-  const [loading,     setLoading]     = useState(false);
+  const [guests, setGuests] = useState<GuestRecord[]>([]);
+  const [showAll, setShowAll] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [checkingOut, setCheckingOut] = useState<number | null>(null);
-  const [selectedGuestQR, setSelectedGuestQR] = useState<{name: string, url: string} | null>(null);
+  const [selectedGuestQR, setSelectedGuestQR] = useState<{ name: string, url: string } | null>(null);
 
   const fetchGuests = useCallback(async () => {
     setLoading(true);
@@ -400,7 +404,7 @@ function GuestsTab() {
   };
 
   const active = guests.filter((g) => g.status === 'active');
-  const past   = guests.filter((g) => g.status === 'checked_out');
+  const past = guests.filter((g) => g.status === 'checked_out');
 
   return (
     <div>
@@ -427,106 +431,122 @@ function GuestsTab() {
         </div>
       </div>
 
-      <h3 className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-3">Currently Checked In</h3>
-
       {active.length === 0 ? (
         <div className="flex items-center gap-3 text-white/40 py-10 justify-center">
           <Users size={24} />
           <span className="text-sm">No active guests — register one via the Register tab.</span>
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-white/10 mb-6">
-          <table className="w-full text-sm min-w-[720px]">
-            <thead>
-              <tr className="bg-navy-light border-b border-white/10">
-                {['Guest', 'Room', 'Floor', 'Language', 'Email', 'Mobile', 'Check-in Date & Time', 'Action'].map((h) => (
-                  <th key={h} className="py-3 px-4 text-left text-white/50 font-medium">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <AnimatePresence>
-                {active.map((g) => (
-                  <motion.tr
-                    key={g.id}
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                  >
-                    <td className="py-3 px-4 text-white font-semibold flex items-center gap-2">
+        <>
+          <h3 className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-3">Currently Checked In</h3>
+          <div className="overflow-x-auto rounded-xl border border-white/10 mb-8">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead>
+                <tr className="bg-navy-light border-b border-white/10">
+                  {['Guest', 'Room', 'Floor', 'Language', 'Email', 'Mobile', 'Check-in Date & Time', 'Action'].map((h) => (
+                    <th key={h} className="py-3 px-4 text-left text-white/50 font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                <AnimatePresence>
+                  {active.map((g) => (
+                    <motion.tr
+                      key={g.id}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                    >
+                      <td className="py-3 px-4 text-white font-semibold flex items-center gap-2">
                         {g.guest_name}
                         {g.qr_token && (
-                            <button 
-                                onClick={() => setSelectedGuestQR({
-                                    name: g.guest_name,
-                                    url: `${window.location.origin}/guest-login?token=${g.qr_token}`
-                                })}
-                                className="text-gold/60 hover:text-gold transition-colors"
-                                title="View Guest QR"
-                            >
-                                <QrCode size={14} />
-                            </button>
+                          <button
+                            onClick={() => setSelectedGuestQR({
+                              name: g.guest_name,
+                              url: `${window.location.origin}/guest-login?token=${g.qr_token}`
+                            })}
+                            className="text-gold/60 hover:text-gold transition-colors"
+                            title="View Guest QR"
+                          >
+                            <QrCode size={14} />
+                          </button>
                         )}
-                    </td>
-                    <td className="py-3 px-4 text-gold font-bold">{g.room_number}</td>
-                    <td className="py-3 px-4 text-white/60">{g.floor}</td>
-                    <td className="py-3 px-4">
-                      <span className="bg-white/10 text-white/70 rounded-full text-xs px-2 py-0.5">{g.language}</span>
-                    </td>
-                    <td className="py-3 px-4 text-white/60 text-xs">{g.email || '—'}</td>
-                    <td className="py-3 px-4 text-white/60 text-xs">{g.mobile || '—'}</td>
-                    <td className="py-3 px-4 text-white/70 text-xs">
-                      <div>{g.checkin_datetime.split('T')[0]}</div>
-                      <div className="text-white/40">{g.checkin_datetime.split('T')[1] ?? ''}</div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <button
-                        onClick={() => handleCheckout(g.room_number)}
-                        disabled={checkingOut === g.room_number}
-                        className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 border border-red-400/30 hover:border-red-400/60 rounded-lg px-3 py-1.5 transition-all mx-auto disabled:opacity-50"
-                      >
-                        <LogOut size={12} />
-                        {checkingOut === g.room_number ? 'Checking out…' : 'Check Out'}
-                      </button>
-                    </td>
-                  </motion.tr>
-                ))}
-              </AnimatePresence>
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td className="py-3 px-4 text-gold font-bold">{g.room_number}</td>
+                      <td className="py-3 px-4 text-white/60">{g.floor}</td>
+                      <td className="py-3 px-4">
+                        <span className="bg-white/10 text-white/70 rounded-full text-xs px-2 py-0.5">{g.language}</span>
+                      </td>
+                      <td className="py-3 px-4 text-white/60 text-xs">{g.email || '—'}</td>
+                      <td className="py-3 px-4 text-white/60 text-xs">{g.mobile || '—'}</td>
+                      <td className="py-3 px-4 text-white/70 text-xs">
+                        <div>{g.checkin_datetime.split('T')[0]}</div>
+                        <div className="text-white/40">{g.checkin_datetime.split('T')[1]?.substring(0, 5) ?? ''}</div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <button
+                          onClick={() => handleCheckout(g.room_number)}
+                          disabled={checkingOut === g.room_number}
+                          className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300 border border-red-400/30 hover:border-red-400/60 rounded-lg px-3 py-1.5 transition-all mx-auto disabled:opacity-50"
+                        >
+                          <LogOut size={12} />
+                          {checkingOut === g.room_number ? 'Checking out…' : 'Check Out'}
+                        </button>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </AnimatePresence>
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       {showAll && past.length > 0 && (
-        <div>
-          <h3 className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-3">
-            Previous Check-outs ({past.length})
-          </h3>
-          <div className="overflow-x-auto rounded-xl border border-white/10 opacity-60">
-            <table className="w-full text-sm min-w-[600px]">
-              <thead>
-                <tr className="bg-navy-light border-b border-white/10">
+        <>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white/30 text-xs font-semibold uppercase tracking-wider">Checked Out History</h3>
+            <button 
+              onClick={async () => {
+                if (window.confirm('Permanently delete all checked-out guest records?')) {
+                  try {
+                    await api.clearGuestHistory();
+                    fetchGuests();
+                    toast.success('History cleared permanently');
+                  } catch (e) { toast.error('Failed to clear history'); }
+                }
+              }}
+              className="text-[10px] text-red-400/50 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded px-2 py-0.5 transition-all"
+            >
+              Clear History
+            </button>
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-white/5 opacity-60">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead className="bg-white/5">
+                <tr>
                   {['Guest', 'Room', 'Language', 'Check-in', 'Check-out'].map((h) => (
-                    <th key={h} className="py-2 px-4 text-left text-white/40 font-medium">{h}</th>
+                    <th key={h} className="py-2.5 px-4 text-left text-white/30 font-medium">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {past.map((g) => (
                   <tr key={g.id} className="border-b border-white/5">
-                    <td className="py-2 px-4 text-white/60">{g.guest_name}</td>
-                    <td className="py-2 px-4 text-white/40">{g.room_number}</td>
-                    <td className="py-2 px-4 text-white/40 text-xs">{g.language}</td>
-                    <td className="py-2 px-4 text-white/40 text-xs">{g.checkin_datetime}</td>
-                    <td className="py-2 px-4 text-white/40 text-xs">{g.checkout_datetime ?? '—'}</td>
+                    <td className="py-2.5 px-4 text-white/70">{g.guest_name}</td>
+                    <td className="py-2.5 px-4 text-white/50">Room {g.room_number}</td>
+                    <td className="py-2.5 px-4 text-white/40 text-xs">{g.language}</td>
+                    <td className="py-2.5 px-4 text-white/30 text-[11px]">{g.checkin_datetime.replace('T', ' ')}</td>
+                    <td className="py-2.5 px-4 text-white/40 text-[11px]">{g.checkout_datetime?.replace('T', ' ') || '—'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </>
       )}
+
 
       {/* QR Modal */}
       <AnimatePresence>
@@ -699,15 +719,15 @@ function StaffManagementTab() {
             <div className="space-y-3">
               <div>
                 <label className="text-white/50 text-xs mb-1 block">Staff ID</label>
-                <input value={newStaff.staff_id} onChange={(e) => setNewStaff(p => ({...p, staff_id: e.target.value}))} placeholder="e.g. SP-1234" className={INPUT} />
+                <input value={newStaff.staff_id} onChange={(e) => setNewStaff(p => ({ ...p, staff_id: e.target.value }))} placeholder="e.g. SP-1234" className={INPUT} />
               </div>
               <div>
                 <label className="text-white/50 text-xs mb-1 block">Name</label>
-                <input value={newStaff.name} onChange={(e) => setNewStaff(p => ({...p, name: e.target.value}))} placeholder="e.g. John Doe" className={INPUT} />
+                <input value={newStaff.name} onChange={(e) => setNewStaff(p => ({ ...p, name: e.target.value }))} placeholder="e.g. John Doe" className={INPUT} />
               </div>
               <div>
                 <label className="text-white/50 text-xs mb-1 block">Security PIN</label>
-                <input value={newStaff.pin} onChange={(e) => setNewStaff(p => ({...p, pin: e.target.value}))} type="password" placeholder="••••" className={INPUT} />
+                <input value={newStaff.pin} onChange={(e) => setNewStaff(p => ({ ...p, pin: e.target.value }))} type="password" placeholder="••••" className={INPUT} />
               </div>
               <Button variant="gold" fullWidth onClick={handleCreate} className="mt-2 text-sm py-2" disabled={loading}>
                 Create Account
@@ -724,9 +744,9 @@ function StaffManagementTab() {
 export default function StaffDashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('register');
   const [broadcastTarget, setBroadcastTarget] = useState<string>('all');
-  const [broadcastText,   setBroadcastText]   = useState('');
-  const [rooms,  setRooms]  = useState<RoomStatus[]>([]);
-  const [stats,  setStats]  = useState<StatsResponse | null>(null);
+  const [broadcastText, setBroadcastText] = useState('');
+  const [rooms, setRooms] = useState<RoomStatus[]>([]);
+  const [stats, setStats] = useState<StatsResponse | null>(null);
 
   const [isMuted, setIsMuted] = useState(false);
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -735,16 +755,16 @@ export default function StaffDashboard() {
   const [alerts, setAlerts] = useState<ApiAlert[]>([]);
   const [broadcastMessages, setBroadcastMessages] = useState<ApiBroadcast[]>([]);
 
-  const dangerZones      = useAppStore((s) => s.dangerZones);
+  const dangerZones = useAppStore((s) => s.dangerZones);
   const toggleDangerZone = useAppStore((s) => s.toggleDangerZone);
-  const setActiveRole    = useAppStore((s) => s.setActiveRole);
+  const setActiveRole = useAppStore((s) => s.setActiveRole);
 
-  const activeAlerts   = alerts.filter((a) => a.status === 'active');
+  const activeAlerts = alerts.filter((a) => a.status === 'active');
   const resolvedAlerts = alerts.filter((a) => a.status === 'acknowledged');
 
   // Continuous SOS Alarm with mute support
   const [lastAlertCount, setLastAlertCount] = useState(0);
-  
+
   useEffect(() => {
     if (activeAlerts.length > lastAlertCount) {
       setIsMuted(false); // New alert arrives -> unmute
@@ -759,7 +779,7 @@ export default function StaffDashboard() {
         try {
           oscRef.current.stop();
           oscRef.current.disconnect();
-        } catch(e) {}
+        } catch (e) { }
         oscRef.current = null;
       }
       return;
@@ -793,7 +813,7 @@ export default function StaffDashboard() {
         return () => {
           clearInterval(interval);
         };
-      } catch(e) {}
+      } catch (e) { }
     }
   }, [activeAlerts.length, isMuted]);
 
@@ -810,30 +830,37 @@ export default function StaffDashboard() {
     try { setBroadcastMessages(await api.getBroadcasts()); } catch { /* offline */ }
   }, []);
 
-  const acknowledgeAlert = async (id: number) => {
+  const acknowledgeAlert = async (id: string) => {
     try {
       await api.acknowledgeAlert(id);
       fetchAlerts();
     } catch { /* offline */ }
   };
 
-  useEffect(() => { 
+  useEffect(() => {
     setActiveRole('staff');
-    fetchRooms(); fetchStats(); fetchAlerts(); fetchBroadcasts(); 
-    
+    fetchRooms(); fetchStats(); fetchAlerts(); fetchBroadcasts();
+
     // Real-time Firestore listeners
     const alertsQuery = query(collection(db, 'alerts'), orderBy('timestamp', 'desc'));
     const unsubAlerts = onSnapshot(alertsQuery, (snapshot) => {
-      const data = snapshot.docs.map(doc => {
-        const d = doc.data();
-        return { 
-          id: doc.id, 
-          ...d,
-          // Ensure severity is a number for the badge to work
-          severity: Number(d.severity || 1)
-        } as any;
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+
+      // Use functional update to compare with previous state for notifications
+      setAlerts(prevAlerts => {
+        const prevActive = prevAlerts.filter(a => a.status === 'active').length;
+        const newActiveData = data.filter(a => a.status === 'active');
+
+        if (newActiveData.length > prevActive) {
+          const newest = newActiveData[0];
+          toast.error(`🚨 EMERGENCY: Room ${newest.room_number} - ${newest.guest_name}`, {
+            duration: 10000,
+            style: { background: '#991b1b', color: '#fff' }
+          });
+          setIsMuted(false);
+        }
+        return data;
       });
-      setAlerts(data);
     });
 
     const broadcastsQuery = query(collection(db, 'broadcasts'), orderBy('timestamp', 'desc'), limit(10));
@@ -842,9 +869,17 @@ export default function StaffDashboard() {
       setBroadcastMessages(data);
     });
 
+    const roomsQuery = query(collection(db, 'rooms'));
+    const unsubRooms = onSnapshot(roomsQuery, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+      setRooms(data);
+      fetchStats();
+    });
+
     return () => {
       unsubAlerts();
       unsubBroadcasts();
+      unsubRooms();
     };
   }, [fetchRooms, fetchStats, fetchAlerts, fetchBroadcasts, setActiveRole]);
 
@@ -853,13 +888,13 @@ export default function StaffDashboard() {
   }, [activeTab, fetchRooms, fetchStats]);
 
   const NAV: { id: Tab; label: string; icon: React.ReactNode; badge?: number }[] = [
-    { id: 'register',  label: 'Register Guest', icon: <UserPlus size={17} /> },
-    { id: 'alerts',    label: 'Alerts',         icon: <BellRing size={17} />, badge: activeAlerts.length },
-    { id: 'map',       label: 'Floor Map',      icon: <Map size={17} /> },
-    { id: 'guests',    label: 'Guest Registry', icon: <Users size={17} /> },
-    { id: 'broadcast', label: 'Broadcast',      icon: <Megaphone size={17} /> },
-    { id: 'occupancy', label: 'Occupancy',      icon: <BarChart2 size={17} /> },
-    { id: 'staff',     label: 'Staff Registry', icon: <Shield size={17} /> },
+    { id: 'register', label: 'Register Guest', icon: <UserPlus size={17} /> },
+    { id: 'alerts', label: 'Alerts', icon: <BellRing size={17} />, badge: activeAlerts.length },
+    { id: 'map', label: 'Floor Map', icon: <Map size={17} /> },
+    { id: 'guests', label: 'Guest Registry', icon: <Users size={17} /> },
+    { id: 'broadcast', label: 'Broadcast', icon: <Megaphone size={17} /> },
+    { id: 'occupancy', label: 'Occupancy', icon: <BarChart2 size={17} /> },
+    { id: 'staff', label: 'Staff Registry', icon: <Shield size={17} /> },
   ];
 
   return (
@@ -875,11 +910,10 @@ export default function StaffDashboard() {
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-5 py-2.5 text-sm transition-colors ${
-                activeTab === item.id
+              className={`w-full flex items-center gap-3 px-5 py-2.5 text-sm transition-colors ${activeTab === item.id
                   ? 'border-l-2 border-gold text-gold bg-white/5'
                   : 'text-white/55 hover:text-white hover:bg-white/5'
-              }`}
+                }`}
             >
               {item.icon}
               <span className="flex-1 text-left">{item.label}</span>
@@ -910,11 +944,11 @@ export default function StaffDashboard() {
                   <span className="bg-danger text-white text-xs font-bold px-2.5 py-1 rounded-full">{activeAlerts.length}</span>
                 )}
                 {activeAlerts.length > 0 && (
-                  <button 
-                     onClick={() => setIsMuted(!isMuted)} 
-                     className="ml-auto flex items-center gap-1.5 text-xs border border-white/20 rounded-lg px-3 py-1.5 text-white/70 hover:text-white transition-colors"
+                  <button
+                    onClick={() => setIsMuted(!isMuted)}
+                    className="ml-auto flex items-center gap-1.5 text-xs border border-white/20 rounded-lg px-3 py-1.5 text-white/70 hover:text-white transition-colors"
                   >
-                     {isMuted ? '🔇 Unmute Siren' : '🔊 Mute Siren'}
+                    {isMuted ? '🔇 Unmute Siren' : '🔊 Mute Siren'}
                   </button>
                 )}
               </div>
@@ -932,7 +966,7 @@ export default function StaffDashboard() {
                     className={`bg-navy-light rounded-xl p-4 mb-3 border border-white/10 border-l-4 ${SEV_BORDER[alert.severity] || SEV_BORDER[5]}`}
                   >
                     <div className="flex flex-wrap items-center gap-2 mb-2">
-                       <span className="text-gold font-bold">Room {alert.room_number}</span>
+                      <span className="text-gold font-bold">Room {alert.room_number}</span>
                       <span className="bg-white/10 text-white/55 text-xs px-2 py-0.5 rounded-full">Floor {alert.floor}</span>
                       <SeverityBadge severity={alert.severity as any} />
                       <span className="text-white/35 text-xs ml-auto">
@@ -941,12 +975,27 @@ export default function StaffDashboard() {
                     </div>
                     <p className="text-white font-medium">{alert.guest_name}</p>
                     <p className="text-white/55 text-sm mt-0.5">{alert.message}</p>
-                    <div className="flex gap-2 mt-3">
+                    <div className="flex flex-wrap items-center gap-2 mt-3">
                       <Button variant="ghost" className="text-sm py-1.5 px-4"
                         onClick={() => { acknowledgeAlert(alert.id); toast.success('Alert acknowledged'); }}>
                         Acknowledge
                       </Button>
-                      <Button variant="ghost" className="text-sm py-1.5 px-4"
+                      <div className="flex items-center bg-white/5 rounded-lg px-2 py-1 gap-2">
+                        <span className="text-[10px] text-white/30 uppercase font-bold">Set Risk:</span>
+                        {[1, 2, 3, 4, 5].map(v => (
+                          <button
+                            key={v}
+                            onClick={() => api.updateAlert(alert.id, { severity: v })}
+                            className={`w-6 h-6 rounded flex items-center justify-center text-[10px] font-bold transition-all ${alert.severity === v
+                                ? 'bg-gold text-navy scale-110 shadow-lg'
+                                : 'bg-white/10 text-white/40 hover:bg-white/20'
+                              }`}
+                          >
+                            {v}
+                          </button>
+                        ))}
+                      </div>
+                      <Button variant="ghost" className="text-sm py-1.5 px-4 ml-auto"
                         onClick={() => setActiveTab('map')}>
                         View on Map
                       </Button>
@@ -954,6 +1003,36 @@ export default function StaffDashboard() {
                   </motion.div>
                 ))}
               </AnimatePresence>
+              {resolvedAlerts.length > 0 && (
+                <div className="mt-8">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-white/35 text-xs font-semibold uppercase tracking-wider">Resolved History</h3>
+                    <button
+                      onClick={async () => {
+                        if (window.confirm('Clear all resolved alert history?')) {
+                          try {
+                            await api.clearResolvedAlerts();
+                            fetchAlerts();
+                            toast.success('Resolved history cleared');
+                          } catch (e) { toast.error('Failed to clear'); }
+                        }
+                      }}
+                      className="text-[10px] text-red-400/50 hover:text-red-400 border border-red-400/20 hover:border-red-400/40 rounded px-2 py-0.5 transition-all"
+                    >
+                      Clear History
+                    </button>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {resolvedAlerts.map((a) => (
+                      <div key={a.id} className="bg-white/5 rounded-xl px-4 py-2 opacity-50 flex items-center gap-2">
+                        <CheckCircle size={13} className="text-safe" />
+                        <span className="text-white/50 text-sm">Room {a.room_number} — {a.guest_name}</span>
+                        <span className="text-white/20 text-[10px] ml-auto">{a.timestamp.split('T')[1]?.substring(0, 5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1014,9 +1093,9 @@ export default function StaffDashboard() {
                         const res = await fetch(`http://${window.location.hostname}:5000/api/ai/suggest-broadcast?target=${broadcastTarget}`);
                         const data = await res.json();
                         setBroadcastText(data.suggestion);
-                      } catch(e) {
-                         setBroadcastText(originalText || 'Please pay attention to the following instructions.');
-                         toast.error('Failed to get AI suggestion');
+                      } catch (e) {
+                        setBroadcastText(originalText || 'Please pay attention to the following instructions.');
+                        toast.error('Failed to get AI suggestion');
                       }
                     }}
                       className="flex items-center gap-1.5 whitespace-nowrap">

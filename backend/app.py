@@ -13,14 +13,8 @@ import uuid
 from deep_translator import GoogleTranslator
 import google.generativeai as genai
 from dotenv import load_dotenv
-from firebase_helper import db_firestore, sync_alert_to_firebase, sync_checkin_to_firebase, sync_staff_to_firebase, delete_staff_from_firebase
-
-LANGUAGE_MAP = {
-    'hindi': 'hi', 'spanish': 'es', 'french': 'fr', 'arabic': 'ar',
-    'german': 'de', 'chinese': 'zh-CN', 'japanese': 'ja', 'russian': 'ru',
-    'portuguese': 'pt', 'italian': 'it', 'korean': 'ko', 'dutch': 'nl',
-    'turkish': 'tr', 'polish': 'pl'
-}
+from firebase_helper import db_firestore
+from firebase_admin import firestore
 
 load_dotenv()
 
@@ -31,177 +25,56 @@ if GEMINI_KEY:
 app = Flask(__name__)
 CORS(app)
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'safepath.db')
-
-
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
+# Legacy database handlers removed to ensure cloud-only storage
 
 def init_db():
-    with get_db() as conn:
-        conn.executescript('''
-            CREATE TABLE IF NOT EXISTS rooms (
-                room_number INTEGER PRIMARY KEY,
-                floor       INTEGER NOT NULL,
-                status      TEXT    NOT NULL DEFAULT 'available'
-            );
-
-            CREATE TABLE IF NOT EXISTS checkins (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                guest_name          TEXT    NOT NULL,
-                room_number         INTEGER NOT NULL,
-                floor               INTEGER NOT NULL,
-                language            TEXT    NOT NULL DEFAULT 'English',
-                email               TEXT    NOT NULL DEFAULT '',
-                mobile              TEXT    NOT NULL DEFAULT '',
-                guests_count        INTEGER DEFAULT 1,
-                qr_token            TEXT    UNIQUE,
-                checkin_datetime    TEXT    NOT NULL,
-                checkout_datetime   TEXT,
-                status              TEXT    NOT NULL DEFAULT 'active',
-                FOREIGN KEY (room_number) REFERENCES rooms(room_number)
-            );
-
-            CREATE TABLE IF NOT EXISTS alerts (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                guest_name          TEXT    NOT NULL,
-                room_number         INTEGER NOT NULL,
-                floor               INTEGER NOT NULL,
-                severity            INTEGER NOT NULL,
-                message             TEXT    NOT NULL,
-                timestamp           TEXT    NOT NULL,
-                status              TEXT    NOT NULL DEFAULT 'active'
-            );
-
-            CREATE TABLE IF NOT EXISTS broadcasts (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                target              TEXT    NOT NULL,
-                message             TEXT    NOT NULL,
-                timestamp           TEXT    NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS staff (
-                staff_id            TEXT    PRIMARY KEY,
-                name                TEXT    NOT NULL,
-                pin                 TEXT    NOT NULL,
-                role                TEXT    NOT NULL DEFAULT 'staff'
-            );
-        ''')
-        conn.commit()
-        
-        # Seed defaults
-        # Default staff
-        conn.execute(
-            'INSERT OR IGNORE INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)',
-            ('admin', 'Admin', 'admin123', 'admin')
-        )
-        # Seed 10 rooms per floor
-        for floor in [1, 2, 3]:
-            for i in range(1, 11):
-                num = floor * 100 + i
-                conn.execute(
-                    'INSERT OR IGNORE INTO rooms (room_number, floor) VALUES (?, ?)',
-                    (num, floor)
-                )
-        conn.commit()
-
-def sync_from_cloud():
-    """Restores local SQLite state from Firestore cloud data."""
     if not db_firestore:
-        print("Firebase not initialized. Skipping cloud sync.")
+        print("CRITICAL: Firestore not initialized. App cannot run in cloud-only mode.")
         return
-    
-    print("☁️ Syncing data from Cloud to local database...")
+
     try:
-        with get_db() as conn:
-            # 1. Sync Staff
-            staff_docs = db_firestore.collection('staff').stream()
-            for doc in staff_docs:
-                d = doc.to_dict()
-                conn.execute(
-                    'INSERT OR REPLACE INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)',
-                    (d.get('staff_id'), d.get('name'), d.get('pin'), d.get('role', 'staff'))
-                )
-            
-            # 2. Sync Alerts
-            alert_docs = db_firestore.collection('alerts').stream()
-            for doc in alert_docs:
-                d = doc.to_dict()
-                conn.execute(
-                    'INSERT OR REPLACE INTO alerts (id, guest_name, room_number, floor, severity, message, timestamp, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (d.get('id'), d.get('guest_name'), d.get('room_number'), d.get('floor'), d.get('severity'), d.get('message'), d.get('timestamp'), d.get('status'))
-                )
-
-            # 3. Sync Check-ins & Update Room Status
-            checkin_docs = db_firestore.collection('checkins').stream()
-            for doc in checkin_docs:
-                d = doc.to_dict()
-                conn.execute(
-                    '''INSERT OR REPLACE INTO checkins 
-                       (id, guest_name, room_number, floor, language, email, mobile, guests_count, qr_token, checkin_datetime, checkout_datetime, status) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (d.get('id'), d.get('guest_name'), d.get('room_number'), d.get('floor'), d.get('language'), d.get('email'), d.get('mobile'), d.get('guests_count', 1), d.get('qr_token'), d.get('checkin_datetime'), d.get('checkout_datetime'), d.get('status'))
-                )
-                # Update room status if check-in is active
-                if d.get('status') == 'active':
-                    conn.execute('UPDATE rooms SET status = "occupied" WHERE room_number = ?', (d.get('room_number'),))
-
-            # 4. Sync Broadcasts
-            broadcast_docs = db_firestore.collection('broadcasts').stream()
-            for doc in broadcast_docs:
-                d = doc.to_dict()
-                conn.execute(
-                    'INSERT OR REPLACE INTO broadcasts (id, target, message, timestamp) VALUES (?, ?, ?, ?)',
-                    (d.get('id'), d.get('target', 'all'), d.get('message'), d.get('timestamp'))
-                )
-            
-            conn.commit()
-            print("✅ Cloud sync complete.")
-    except Exception as e:
-        print(f"❌ Error during Cloud sync: {e}")
-
-
-def migrate_db():
-    """Safely add new columns to existing DB if they're missing."""
-    with get_db() as conn:
-        cols = [row[1] for row in conn.execute('PRAGMA table_info(checkins)')]
-        if 'email' not in cols:
-            conn.execute('ALTER TABLE checkins ADD COLUMN email TEXT NOT NULL DEFAULT ""')
-        if 'mobile' not in cols:
-            conn.execute('ALTER TABLE checkins ADD COLUMN mobile TEXT NOT NULL DEFAULT ""')
-        try:
-            conn.execute('ALTER TABLE checkins ADD COLUMN qr_token TEXT')
-        except sqlite3.OperationalError:
-            pass
-        try:
-            conn.execute('ALTER TABLE checkins ADD COLUMN guests_count INTEGER DEFAULT 1')
-        except sqlite3.OperationalError:
-            pass
+        # Bootstrap rooms if they don't exist in Firestore
+        rooms_ref = db_firestore.collection('rooms')
+        # Check if rooms collection has any documents
+        if len(list(rooms_ref.limit(1).stream())) == 0:
+            print("Bootstrapping rooms in Firestore...")
+            for f in range(1, 4):
+                for r in range(1, 11):
+                    r_num = f * 100 + r
+                    rooms_ref.document(str(r_num)).set({
+                        'room_number': r_num,
+                        'floor': f,
+                        'status': 'available',
+                        'guest_name': None,
+                        'language': None,
+                        'checkin_datetime': None
+                    })
         
-        conn.execute('CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY AUTOINCREMENT, guest_name TEXT NOT NULL, room_number INTEGER NOT NULL, floor INTEGER NOT NULL, severity INTEGER NOT NULL, message TEXT NOT NULL, timestamp TEXT NOT NULL, status TEXT NOT NULL DEFAULT "active")')
-        conn.execute('CREATE TABLE IF NOT EXISTS broadcasts (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, message TEXT NOT NULL, timestamp TEXT NOT NULL)')
-        conn.execute('CREATE TABLE IF NOT EXISTS staff (staff_id TEXT PRIMARY KEY, name TEXT NOT NULL, pin TEXT NOT NULL, role TEXT NOT NULL DEFAULT "staff")')
-        conn.execute('INSERT OR IGNORE INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)', ('admin', 'Admin', 'admin123', 'admin'))
-        conn.commit()
+        # Bootstrap admin staff if missing
+        staff_ref = db_firestore.collection('staff')
+        if not staff_ref.document('admin').get().exists:
+            staff_ref.document('admin').set({
+                'staff_id': 'admin',
+                'name': 'Admin',
+                'pin': 'admin123',
+                'role': 'admin'
+            })
+        print("Firestore initialization complete.")
+    except Exception as e:
+        print(f"Firestore bootstrap error: {e}")
 
 
 # ─── Rooms ────────────────────────────────────────────────────────────────────
 
 @app.route('/api/rooms', methods=['GET'])
 def get_rooms():
-    with get_db() as conn:
-        rows = conn.execute('''
-            SELECT r.room_number, r.floor, r.status,
-                   c.guest_name, c.language, c.checkin_datetime
-            FROM rooms r
-            LEFT JOIN checkins c
-                ON r.room_number = c.room_number AND c.status = 'active'
-            ORDER BY r.room_number
-        ''').fetchall()
-    return jsonify([dict(r) for r in rows])
+    if not db_firestore: return jsonify([])
+    docs = db_firestore.collection('rooms').stream()
+    rooms = []
+    for doc in docs:
+        rooms.append(doc.to_dict())
+    rooms.sort(key=lambda x: x['room_number'])
+    return jsonify(rooms)
 
 
 # ─── Staff: Register Guest & Generate QR ─────────────────────────────────────
@@ -209,100 +82,76 @@ def get_rooms():
 @app.route('/api/register-guest', methods=['POST'])
 def register_guest():
     data = request.get_json(force=True)
-    name        = str(data.get('name', '')).strip()
-    room_number = int(data.get('roomNumber', 0))
-    language    = str(data.get('language', 'English'))
-    email       = str(data.get('email', '')).strip()
-    mobile      = str(data.get('mobile', '')).strip()
+    name         = str(data.get('name', '')).strip()
+    room_number  = int(data.get('roomNumber', 0))
+    language     = str(data.get('language', 'English'))
+    email        = str(data.get('email', '')).strip()
+    mobile       = str(data.get('mobile', '')).strip()
     guests_count = int(data.get('guestsCount', 1))
 
-    if not name:
-        return jsonify({'error': 'Guest name is required'}), 400
-    if room_number <= 0:
-        return jsonify({'error': 'Invalid room number'}), 400
-    if not email:
-        return jsonify({'error': 'Guest email is required'}), 400
-    if not mobile:
-        return jsonify({'error': 'Guest mobile number is required'}), 400
+    if not name or not email or not mobile or room_number <= 0:
+        return jsonify({'error': 'All fields are required.'}), 400
 
-    with get_db() as conn:
-        room = conn.execute(
-            'SELECT * FROM rooms WHERE room_number = ?', (room_number,)
-        ).fetchone()
-        if not room:
+    if not db_firestore:
+        return jsonify({'error': 'Cloud storage unavailable'}), 503
+
+    try:
+        # Check if room is available
+        room_doc = db_firestore.collection('rooms').document(str(room_number)).get()
+        if not room_doc.exists:
             return jsonify({'error': f'Room {room_number} does not exist'}), 404
-
-        occupied = conn.execute(
-            'SELECT guest_name FROM checkins WHERE room_number = ? AND status = "active"',
-            (room_number,)
-        ).fetchone()
-        if occupied:
-            return jsonify({
-                'error': f'Room {room_number} is already occupied by {occupied["guest_name"]}. Please choose another room.'
-            }), 409
+        
+        rdata = room_doc.to_dict()
+        if rdata.get('status') == 'occupied':
+            return jsonify({'error': 'Room is already occupied'}), 409
 
         token = str(uuid.uuid4())
-        now   = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+        now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
-        conn.execute('''
-            INSERT INTO checkins
-                (guest_name, room_number, floor, language, email, mobile, qr_token, checkin_datetime, status, guests_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
-        ''', (name, room_number, room['floor'], language, email, mobile, token, now, guests_count))
-        conn.execute(
-            'UPDATE rooms SET status = "occupied" WHERE room_number = ?', (room_number,)
-        )
-        conn.commit()
-
-        # Sync to Firebase
-        sync_checkin_to_firebase({
-            'name': name,
+        checkin_data = {
+            'id': token,
+            'guest_name': name,
             'room_number': room_number,
-            'floor': room['floor'],
+            'floor': rdata['floor'],
             'language': language,
             'email': email,
             'mobile': mobile,
+            'guests_count': guests_count,
             'qr_token': token,
             'checkin_datetime': now,
-            'status': 'active',
-            'guests_count': guests_count
-        })
-        
-    base_url = request.headers.get('Origin', 'http://localhost:5173')
-    send_checkin_notifications(name, room_number, base_url, token, email, mobile)
-
-    return jsonify({
-        'success': True,
-        'token': token,
-        'guest': {
-            'name':             name,
-            'roomNumber':       room_number,
-            'floor':            room['floor'],
-            'language':         language,
-            'email':            email,
-            'mobile':           mobile,
-            'checkinDatetime':  now,
-            'guestsCount':      guests_count
+            'status': 'active'
         }
-    }), 201
+        # Save checkin
+        db_firestore.collection('checkins').document(token).set(checkin_data)
+        
+        # Update room
+        db_firestore.collection('rooms').document(str(room_number)).set({
+            'status': 'occupied',
+            'guest_name': name,
+            'language': language,
+            'checkin_datetime': now
+        }, merge=True)
+
+        base_url = request.headers.get('Origin', 'http://localhost:5173')
+        send_checkin_notifications(name, room_number, base_url, token, email, mobile)
+
+        return jsonify({'success': True, 'token': token, 'guest': checkin_data}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ─── Guest: Verify QR Token ───────────────────────────────────────────────────
 
 @app.route('/api/guest-by-token/<token>', methods=['GET'])
 def guest_by_token(token):
-    with get_db() as conn:
-        row = conn.execute('''
-            SELECT c.id, c.guest_name, c.room_number, c.floor, c.language,
-                   c.email, c.mobile, c.checkin_datetime, c.qr_token, c.guests_count
-            FROM checkins c
-            WHERE c.qr_token = ? AND c.status = 'active'
-        ''', (token,)).fetchone()
-
-    if not row:
-        return jsonify({'error': 'Invalid or expired QR code. Please ask staff to re-register.'}), 404
-
-    return jsonify(dict(row))
+    if not db_firestore:
+        return jsonify({'error': 'Cloud storage unavailable'}), 503
+    
+    doc = db_firestore.collection('checkins').document(token).get()
+    if not doc.exists:
+        return jsonify({'error': 'Invalid or expired QR code.'}), 404
+        
+    return jsonify(doc.to_dict())
 
 
 # ─── Staff: Check-out ─────────────────────────────────────────────────────────
@@ -311,33 +160,42 @@ def guest_by_token(token):
 def checkout():
     data = request.get_json(force=True)
     room_number = int(data.get('roomNumber', 0))
+    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
 
-    with get_db() as conn:
-        checkin_rec = conn.execute(
-            'SELECT id, guest_name FROM checkins WHERE room_number = ? AND status = "active"',
-            (room_number,)
-        ).fetchone()
-        if not checkin_rec:
-            return jsonify({'error': f'No active check-in found for Room {room_number}'}), 404
+    if not db_firestore:
+        return jsonify({'error': 'Cloud storage unavailable'}), 503
 
-        now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
-        conn.execute(
-            'UPDATE checkins SET status = "checked_out", checkout_datetime = ? WHERE id = ?',
-            (now, checkin_rec['id'])
-        )
-        conn.execute(
-            'UPDATE rooms SET status = "available" WHERE room_number = ?', (room_number,)
-        )
-        conn.commit()
+    try:
+        # Find the active checkin for this room
+        query = db_firestore.collection('checkins')\
+            .where('room_number', '==', room_number)\
+            .where('status', '==', 'active')\
+            .limit(1).stream()
+        
+        checkin_id = None
+        for doc in query:
+            checkin_id = doc.id
+        
+        if not checkin_id:
+            return jsonify({'error': 'No active guest found for this room'}), 404
 
-        # Sync update to Firebase (mark as checked out or delete)
-        if db_firestore:
-           db_firestore.collection('checkins').document(str(room_number)).update({'status': 'checked_out', 'checkout_datetime': now})
+        # 1. Update checkin status
+        db_firestore.collection('checkins').document(checkin_id).set({
+            'status': 'checked_out',
+            'checkout_datetime': now
+        }, merge=True)
 
-    return jsonify({
-        'success': True,
-        'message': f'Room {room_number} — {checkin_rec["guest_name"]} checked out at {now}'
-    })
+        # 2. Reset room status
+        db_firestore.collection('rooms').document(str(room_number)).set({
+            'status': 'available',
+            'guest_name': None,
+            'language': None,
+            'checkin_datetime': None
+        }, merge=True)
+
+        return jsonify({'success': True, 'message': 'Checked out successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ─── Guests list ──────────────────────────────────────────────────────────────
@@ -345,49 +203,77 @@ def checkout():
 @app.route('/api/guests', methods=['GET'])
 def get_guests():
     status_filter = request.args.get('status', 'active')
-    with get_db() as conn:
-        if status_filter == 'all':
-            rows = conn.execute('''
-                SELECT id, guest_name, room_number, floor, language,
-                       email, mobile, checkin_datetime, checkout_datetime, status, qr_token, guests_count
-                FROM checkins ORDER BY checkin_datetime DESC
-            ''').fetchall()
-        else:
-            rows = conn.execute('''
-                SELECT id, guest_name, room_number, floor, language,
-                       email, mobile, checkin_datetime, checkout_datetime, status, qr_token, guests_count
-                FROM checkins WHERE status = ? ORDER BY checkin_datetime DESC
-            ''', (status_filter,)).fetchall()
-    return jsonify([dict(r) for r in rows])
+    if not db_firestore: return jsonify([])
+    try:
+        query = db_firestore.collection('checkins')
+        if status_filter != 'all':
+            query = query.where('status', '==', status_filter)
+        
+        # Order by checkin time descending
+        docs = query.order_by('checkin_datetime', direction=firestore.Query.DESCENDING).stream()
+        return jsonify([doc.to_dict() for doc in docs])
+    except Exception as e:
+        print(f"Error fetching guests: {e}")
+        # If index is missing, fall back to un-ordered stream
+        try:
+            docs = db_firestore.collection('checkins').stream()
+            results = [doc.to_dict() for doc in docs]
+            if status_filter != 'all':
+                results = [r for r in results if r.get('status') == status_filter]
+            return jsonify(results)
+        except:
+            return jsonify([])
+
+@app.route('/api/guests/history', methods=['DELETE'])
+def clear_guest_history():
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    try:
+        docs = db_firestore.collection('checkins').where('status', '==', 'checked_out').stream()
+        count = 0
+        for doc in docs:
+            doc.reference.delete()
+            count += 1
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 # ─── Stats ────────────────────────────────────────────────────────────────────
-
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
-    with get_db() as conn:
-        total    = conn.execute('SELECT COUNT(*) as c FROM rooms').fetchone()['c']
-        occupied = conn.execute(
-            'SELECT COUNT(*) as c FROM rooms WHERE status = "occupied"'
-        ).fetchone()['c']
-        by_floor = conn.execute('''
-            SELECT floor,
-                   COUNT(*) as total,
-                   SUM(CASE WHEN status="occupied" THEN 1 ELSE 0 END) as occupied
-            FROM rooms GROUP BY floor ORDER BY floor
-        ''').fetchall()
+    if not db_firestore: return jsonify({'total': 0, 'occupied': 0, 'byFloor': []})
+    
+    docs = db_firestore.collection('rooms').stream()
+    rooms = [doc.to_dict() for doc in docs]
+    
+    occupied = sum(1 for r in rooms if r.get('status') == 'occupied')
+    
+    floors = {}
+    for r in rooms:
+        f = r['floor']
+        if f not in floors: floors[f] = {'floor': f, 'total': 0, 'occupied': 0}
+        floors[f]['total'] += 1
+        if r.get('status') == 'occupied':
+            floors[f]['occupied'] += 1
+            
     return jsonify({
-        'total': total, 'occupied': occupied, 'available': total - occupied,
-        'byFloor': [dict(r) for r in by_floor]
+        'total': len(rooms),
+        'occupied': occupied,
+        'byFloor': sorted(floors.values(), key=lambda x: x['floor'])
     })
 
 # ─── Alerts ───────────────────────────────────────────────────────────────────
 
 @app.route('/api/alerts', methods=['GET'])
 def get_alerts():
-    with get_db() as conn:
-        rows = conn.execute('SELECT * FROM alerts ORDER BY timestamp DESC').fetchall()
-    return jsonify([dict(r) for r in rows])
+    if not db_firestore: return jsonify([])
+    try:
+        from firebase_admin import firestore
+        docs = db_firestore.collection('alerts')\
+            .order_by('timestamp', direction=firestore.Query.DESCENDING)\
+            .limit(50).stream()
+        return jsonify([doc.to_dict() for doc in docs])
+    except Exception: return jsonify([])
 
 @app.route('/api/alerts', methods=['POST'])
 def create_alert():
@@ -396,72 +282,90 @@ def create_alert():
     room_number = int(data.get('roomNumber', 0))
     floor = int(data.get('floor', 0))
     message = str(data.get('message', ''))
-    
-    # Use severity from frontend as default, then try to override with Gemini
-    severity = int(data.get('severity', 1))
-    
-    if GEMINI_KEY:
-        try:
-            model = genai.GenerativeModel('gemini-flash-latest')
-            prompt = f"Analyze the following emergency message and return exactly one single number from 1 to 5 (1=low, 5=critical). Do not output any other text or explanation. Message: '{message}'"
-            resp = model.generate_content(prompt)
-            import re
-            m = re.search(r'[1-5]', resp.text)
-            if m:
-                severity = int(m.group(0))
-        except Exception as e:
-            print(f"Severity AI Error: {e}")
-    
+    severity = 1
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     
-    with get_db() as conn:
-        cursor = conn.execute(
-            'INSERT INTO alerts (guest_name, room_number, floor, severity, message, timestamp, status) VALUES (?, ?, ?, ?, ?, ?, "active")',
-            (guest_name, room_number, floor, severity, message, now)
-        )
-        alert_id = cursor.lastrowid
-        conn.commit()
+    if not db_firestore:
+        return jsonify({'error': 'Cloud storage unavailable'}), 503
 
-        # Sync to Firebase
-        sync_alert_to_firebase({
-            'id': alert_id,
-            'guest_name': guest_name,
-            'room_number': room_number,
-            'floor': floor,
-            'severity': severity,
-            'message': message,
-            'timestamp': now,
-            'status': 'active'
-        })
+    # Generate a unique ID (Firestore style) or just use timestamp+room
+    alert_id = f"{now}-{room_number}"
+    
+    alert_data = {
+        'id': alert_id,
+        'guest_name': guest_name,
+        'room_number': room_number,
+        'floor': floor,
+        'severity': severity,
+        'message': message,
+        'timestamp': now,
+        'status': 'active'
+    }
+    db_firestore.collection('alerts').document(alert_id).set(alert_data)
+
+    # ASYNC Gemini Severity Check
+    if GEMINI_KEY:
+        def analyze_severity_async(aid, msg):
+            try:
+                model = genai.GenerativeModel('gemini-flash-latest')
+                prompt = f"Analyze emergency message and return exactly one number 1-5. Message: '{msg}'"
+                resp = model.generate_content(prompt)
+                import re
+                m = re.search(r'[1-5]', resp.text)
+                if m:
+                    db_firestore.collection('alerts').document(aid).set({'severity': int(m.group(0))}, merge=True)
+            except: pass
+        
+        import threading
+        threading.Thread(target=analyze_severity_async, args=(alert_id, message)).start()
     
     return jsonify({'success': True, 'id': alert_id, 'severity': severity}), 201
 
-@app.route('/api/alerts/<int:alert_id>/acknowledge', methods=['POST'])
-def acknowledge_alert(alert_id):
-    with get_db() as conn:
-        conn.execute('UPDATE alerts SET status = "acknowledged" WHERE id = ?', (alert_id,))
-        conn.commit()
-        
-        # Sync to Firebase
-        if db_firestore:
-            db_firestore.collection('alerts').document(str(alert_id)).update({'status': 'acknowledged'})
+@app.route('/api/alerts/resolved', methods=['DELETE'])
+def clear_resolved_alerts():
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    try:
+        docs = db_firestore.collection('alerts').where('status', '==', 'acknowledged').stream()
+        count = 0
+        for doc in docs:
+            doc.reference.delete()
+            count += 1
+        return jsonify({'success': True, 'count': count})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/alerts/<alert_id>', methods=['PATCH'])
+def update_alert(alert_id):
+    data = request.get_json(force=True)
+    severity = data.get('severity')
+    status = data.get('status')
+    
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    
+    updates = {}
+    if severity is not None: updates['severity'] = int(severity)
+    if status is not None:   updates['status'] = status
+    
+    if updates:
+        db_firestore.collection('alerts').document(str(alert_id)).set(updates, merge=True)
+            
     return jsonify({'success': True})
 
 @app.route('/api/alerts/resolve-by-room', methods=['POST'])
 def resolve_alerts_by_room():
     data = request.get_json(force=True)
     room_number = int(data.get('roomNumber', 0))
-    with get_db() as conn:
-        # Get IDs of alerts that will be acknowledged for syncing
-        ids = [row['id'] for row in conn.execute('SELECT id FROM alerts WHERE room_number = ? AND status = "active"', (room_number,))]
-        
-        conn.execute('UPDATE alerts SET status = "acknowledged" WHERE room_number = ? AND status = "active"', (room_number,))
-        conn.commit()
-        
-        # Sync to Firebase
-        if db_firestore and ids:
-            for alert_id in ids:
-                db_firestore.collection('alerts').document(str(alert_id)).update({'status': 'acknowledged'})
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    
+    try:
+        query = db_firestore.collection('alerts')\
+            .where('room_number', '==', room_number)\
+            .where('status', '==', 'active')
+        docs = query.stream()
+        for doc in docs:
+            doc.reference.update({'status': 'acknowledged'})
+    except Exception as e:
+        print(f"Firestore resolve error: {e}")
     return jsonify({'success': True})
 
 # ─── Broadcasts ───────────────────────────────────────────────────────────────
@@ -469,21 +373,30 @@ def resolve_alerts_by_room():
 @app.route('/api/broadcasts', methods=['GET'])
 def get_broadcasts():
     lang = request.args.get('language')
-    with get_db() as conn:
-        rows = conn.execute('SELECT * FROM broadcasts ORDER BY timestamp DESC').fetchall()
+    if not db_firestore: return jsonify([])
     
-    broadcasts = [dict(r) for r in rows]
+    try:
+        docs = db_firestore.collection('broadcasts')\
+            .order_by('timestamp', direction=firestore.Query.DESCENDING)\
+            .limit(20).stream()
+        broadcasts = [doc.to_dict() for doc in docs]
+    except: return jsonify([])
     
-    if lang and lang.lower() != 'english':
-        target_code = LANGUAGE_MAP.get(lang.lower(), lang.lower())
+    lang_map = {
+        'English': 'en', 'Hindi': 'hi', 'Spanish': 'es', 'French': 'fr',
+        'Arabic': 'ar', 'German': 'de', 'Chinese': 'zh-CN', 'Japanese': 'ja',
+        'Russian': 'ru', 'Portuguese': 'pt'
+    }
+    target_lang = lang_map.get(lang, lang.lower()) if lang else 'en'
+    
+    if target_lang != 'en' and broadcasts:
         try:
-            translator = GoogleTranslator(source='auto', target=target_code)
+            translator = GoogleTranslator(source='auto', target=target_lang)
             for idx, b in enumerate(broadcasts):
-                translated = translator.translate(b['message'])
-                if translated:
-                    broadcasts[idx]['message'] = translated
-        except Exception as e:
-            print(f"Translation Failure for {lang} ({target_code}): {e}")
+                try:
+                    broadcasts[idx]['message'] = translator.translate(b['message'])
+                except: pass
+        except: pass
 
     return jsonify(broadcasts)
 
@@ -508,62 +421,57 @@ def create_broadcast():
     message = str(data.get('message', ''))
     now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     
-    with get_db() as conn:
-        conn.execute(
-            'INSERT INTO broadcasts (target, message, timestamp) VALUES (?, ?, ?)',
-            (target, message, now)
-        )
-        cursor = conn.execute('SELECT last_insert_rowid()')
-        b_id = cursor.fetchone()[0]
-        conn.commit()
-
-        # Sync to Firebase
-        if db_firestore:
-           db_firestore.collection('broadcasts').document(str(b_id)).set({
-               'id': b_id,
-               'target': target,
-               'message': message,
-               'timestamp': now
-           })
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    
+    b_id = f"b-{now}"
+    b_data = {'id': b_id, 'target': target, 'message': message, 'timestamp': now}
+    db_firestore.collection('broadcasts').document(b_id).set(b_data)
+    
     return jsonify({'success': True}), 201
 
-@app.route('/api/broadcasts/<int:broadcast_id>', methods=['DELETE'])
+@app.route('/api/broadcasts/<broadcast_id>', methods=['DELETE'])
 def delete_broadcast(broadcast_id):
-    with get_db() as conn:
-        conn.execute('DELETE FROM broadcasts WHERE id = ?', (broadcast_id,))
-        conn.commit()
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    db_firestore.collection('broadcasts').document(str(broadcast_id)).delete()
     return jsonify({'success': True})
 
 @app.route('/api/broadcasts', methods=['DELETE'])
 def clear_all_broadcasts():
-    with get_db() as conn:
-        conn.execute('DELETE FROM broadcasts')
-        conn.commit()
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    try:
+        docs = db_firestore.collection('broadcasts').list_documents()
+        for doc in docs:
+            doc.delete()
+    except: pass
     return jsonify({'success': True})
 
 @app.route('/api/clear-trials', methods=['DELETE'])
 def clear_trials():
-    with get_db() as conn:
-        conn.execute('DELETE FROM broadcasts')
-        conn.execute('DELETE FROM checkins')
-        conn.execute('DELETE FROM alerts')
-        conn.execute('UPDATE rooms SET status = "available"')
-        conn.commit()
-    return jsonify({'success': True, 'message': 'All trial data cleared'})
-
-@app.route('/api/maintenance/clear-local', methods=['POST'])
-def clear_local_db():
-    """Wipes the local database file and re-initializes it."""
+    if not db_firestore:
+        return jsonify({'error': 'Cloud storage unavailable'}), 503
     try:
-        if os.path.exists(DB_PATH):
-            os.remove(DB_PATH)
-        init_db()
-        migrate_db()
-        # Optionally we don't sync from cloud here if we want a TOTAL reset,
-        # but usually we want to re-download from cloud after a local clear.
-        return jsonify({'success': True, 'message': 'Local database cleared and re-initialized'})
+        for coll in ['broadcasts', 'alerts', 'checkins']:
+            docs = db_firestore.collection(coll).list_documents()
+            for doc in docs:
+                doc.delete()
+        
+        # Reset rooms in Firestore too
+        rooms_docs = db_firestore.collection('rooms').list_documents()
+        for doc in rooms_docs:
+            try:
+                r_id = int(doc.id)
+            except:
+                r_id = 0
+            doc.set({
+                'status': 'available',
+                'guest_name': None,
+                'language': None,
+                'room_number': r_id
+            }, merge=True)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"Error clearing Firestore: {e}")
+
+    return jsonify({'success': True, 'message': 'All cloud data cleared.'})
 
 # ─── Staff Management ─────────────────────────────────────────────────────────
 
@@ -573,76 +481,45 @@ def login_staff():
     staff_id = str(data.get('staff_id', '')).strip()
     pin = str(data.get('pin', '')).strip()
 
-    if not staff_id or not pin:
-        return jsonify({'error': 'Staff ID and PIN are required'}), 400
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
 
-    with get_db() as conn:
-        row = conn.execute(
-            'SELECT name, role FROM staff WHERE staff_id = ? AND pin = ?',
-            (staff_id, pin)
-        ).fetchone()
+    doc = db_firestore.collection('staff').document(staff_id).get()
+    if not doc.exists:
+        return jsonify({'error': 'Invalid Staff ID'}), 401
+    
+    sdata = doc.to_dict()
+    if str(sdata.get('pin')) != pin:
+        return jsonify({'error': 'Invalid PIN'}), 401
 
-    if not row:
-        return jsonify({'error': 'Invalid Staff ID or PIN'}), 401
-
-    return jsonify({'success': True, 'staff': dict(row)})
-
+    return jsonify({'success': True, 'staff': sdata})
 
 @app.route('/api/staff', methods=['GET'])
 def get_staff_list():
-    with get_db() as conn:
-        rows = conn.execute('SELECT staff_id, name, role FROM staff').fetchall()
-    return jsonify([dict(r) for r in rows])
-
+    if not db_firestore: return jsonify([])
+    docs = db_firestore.collection('staff').stream()
+    return jsonify([doc.to_dict() for doc in docs])
 
 @app.route('/api/staff', methods=['POST'])
 def add_staff():
     data = request.get_json(force=True)
-    staff_id = str(data.get('staff_id', '')).strip()
+    sid = str(data.get('staff_id', '')).strip()
     name = str(data.get('name', '')).strip()
     pin = str(data.get('pin', '')).strip()
     role = str(data.get('role', 'staff')).strip()
 
-    if not staff_id or not name or not pin:
-        return jsonify({'error': 'Staff ID, Name, and PIN are required'}), 400
-
-    with get_db() as conn:
-        existing = conn.execute('SELECT staff_id FROM staff WHERE staff_id = ?', (staff_id,)).fetchone()
-        if existing:
-            return jsonify({'error': 'Staff ID already exists'}), 409
-        
-        conn.execute(
-            'INSERT INTO staff (staff_id, name, pin, role) VALUES (?, ?, ?, ?)',
-            (staff_id, name, pin, role)
-        )
-        conn.commit()
-
-        # Sync to Firebase
-        sync_staff_to_firebase({
-            'staff_id': staff_id,
-            'name': name,
-            'role': role,
-            'pin': pin  # Optionally encrypt/hash this before sync if needed, but for simplicity we'll sync as is
-        })
-
-    return jsonify({'success': True, 'message': 'Staff added successfully'}), 201
-
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    
+    db_firestore.collection('staff').document(sid).set({
+        'staff_id': sid, 'name': name, 'pin': pin, 'role': role
+    })
+    return jsonify({'success': True}), 201
 
 @app.route('/api/staff/<staff_id>', methods=['DELETE'])
 def delete_staff(staff_id):
-    if staff_id == 'admin':
-        return jsonify({'error': 'Cannot delete the default admin account'}), 403
-
-    with get_db() as conn:
-        cursor = conn.execute('DELETE FROM staff WHERE staff_id = ?', (staff_id,))
-        if cursor.rowcount == 0:
-             return jsonify({'error': 'Staff ID not found'}), 404
-        conn.commit()
-        
-        # Sync to Firebase
-        delete_staff_from_firebase(staff_id)
-
-    return jsonify({'success': True, 'message': 'Staff deleted successfully'})
+    if staff_id == 'admin': return jsonify({'error': 'Cannot delete admin'}), 403
+    if not db_firestore: return jsonify({'error': 'Cloud offline'}), 503
+    db_firestore.collection('staff').document(staff_id).delete()
+    return jsonify({'success': True})
 
 import smtplib
 from email.mime.text import MIMEText
@@ -731,13 +608,11 @@ def send_checkin_notifications(guest_name, room, base_url, token, email, mobile)
     if email:
         threading.Thread(target=send_real_email, daemon=True).start()
 
-    print(f"[SMS] Simulated SMS to: {mobile}", flush=True)
-    print(f"SafePath: Welcome {guest_name}! Access your live guide: {login_url}", flush=True)
+    print(f"[NOTIFICATION] Check-in processed for {guest_name} (Room {room}). SMS feature disabled by request.", flush=True)
     print("=" * 50, flush=True)
 
 
 if __name__ == '__main__':
     init_db()
-    migrate_db()
-    print('SafePath backend: http://0.0.0.0:5000')
+    print('SafePath Cloud Backend: http://0.0.0.0:5000')
     app.run(debug=True, port=5000, host='0.0.0.0')
