@@ -7,7 +7,7 @@ import Layout from '../../components/Layout/Layout';
 import Navbar from '../../components/Navbar/Navbar';
 import GlassCard from '../../components/GlassCard/GlassCard';
 import Button from '../../components/Button/Button';
-import SafetyMap from '../../components/HotelMap/SafetyMap';
+import SafetyMap from '../../components/HospitalMap/SafetyMap';
 import { useAppStore } from '../../store/useAppStore';
 import { api } from '../../api/client';
 import type { RoomStatus } from '../../api/client';

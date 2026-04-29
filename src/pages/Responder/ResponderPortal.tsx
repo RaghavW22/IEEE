@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { Navigate } from 'react-router-dom';
 import { collection, query, orderBy, onSnapshot, where, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { motion } from 'framer-motion';
@@ -6,7 +7,7 @@ import { Activity, Users, AlertOctagon, ScrollText, Clock } from 'lucide-react';
 import toast from 'react-hot-toast';
 import Navbar from '../../components/Navbar/Navbar';
 import GlassCard from '../../components/GlassCard/GlassCard';
-import SafetyMap from '../../components/HotelMap/SafetyMap';
+import SafetyMap from '../../components/HospitalMap/SafetyMap';
 import { useAppStore } from '../../store/useAppStore';
 import { api, type ApiAlert, type RoomStatus, type StatsResponse, type ApiBroadcast } from '../../api/client';
 
@@ -27,6 +28,12 @@ const eventDotColor: Record<string, string> = {
 };
 
 export default function ResponderPortal() {
+  const activeRole = useAppStore((s) => s.activeRole);
+
+  if (activeRole !== 'responder') {
+    return <Navigate to="/" replace />;
+  }
+
   const dangerZones = useAppStore((s) => s.dangerZones);
   const setDangerZones = useAppStore((s) => s.setDangerZones);
   const setActiveRole = useAppStore((s) => s.setActiveRole);
@@ -78,7 +85,6 @@ export default function ResponderPortal() {
   }, []);
 
   useEffect(() => {
-    setActiveRole('responder');
     const timeout = setTimeout(() => setShimmer(false), 1500);
     return () => clearTimeout(timeout);
   }, [setActiveRole]);

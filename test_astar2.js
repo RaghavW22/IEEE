@@ -1,4 +1,4 @@
-// SVG constants matching HotelMap.tsx exactly
+// SVG constants matching HospitalMap.tsx exactly
 const VB_W = 900, VB_H = 560;
 const ROOM_W = 90, ROOM_H = 72;
 const ROOM_STEP = 74;

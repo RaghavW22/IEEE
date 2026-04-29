@@ -56,7 +56,10 @@ export default function LandingPage() {
       desc: 'Live zone-map with real-time occupancy data, priority intervention areas, and incident logs.',
       buttonLabel: 'Responder Portal',
       buttonVariant: 'danger' as const,
-      action: () => navigate('/responder'),
+      action: () => {
+        useAppStore.getState().setActiveRole('responder');
+        navigate('/responder');
+      },
     },
   ];
 
@@ -75,6 +78,9 @@ export default function LandingPage() {
           </div>
           <h1 className="font-outfit text-white text-6xl sm:text-7xl font-extrabold tracking-tight">
             Safe<span className="text-emerald-400">Path</span>
+            <span className="block text-xl sm:text-2xl mt-2 text-white/50 font-medium tracking-normal">
+              Emergency Response System
+            </span>
           </h1>
           <p className="text-white/65 text-lg mt-4 max-w-lg mx-auto leading-relaxed">
             AI-powered emergency ecosystem designed to democratize safety and build community resilience in underserved areas.

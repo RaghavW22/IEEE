@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate, Navigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BellRing, Map, Megaphone, BarChart2, Users,
@@ -12,7 +13,7 @@ import Navbar from '../../components/Navbar/Navbar';
 import GlassCard from '../../components/GlassCard/GlassCard';
 import Button from '../../components/Button/Button';
 import SeverityBadge from '../../components/Badge/SeverityBadge';
-import SafetyMap from '../../components/HotelMap/SafetyMap';
+import SafetyMap from '../../components/HospitalMap/SafetyMap';
 import { useAppStore } from '../../store/useAppStore';
 import { api } from '../../api/client';
 import type { RoomStatus, GuestRecord, StatsResponse, RegisterGuestResponse, ApiAlert, ApiBroadcast } from '../../api/client';
@@ -763,6 +764,12 @@ function StaffManagementTab() {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function StaffDashboard() {
+  const activeRole = useAppStore((s) => s.activeRole);
+
+  if (activeRole !== 'staff') {
+    return <Navigate to="/" replace />;
+  }
+
   const [activeTab, setActiveTab] = useState<Tab>('register');
   const [broadcastTarget, setBroadcastTarget] = useState<string>('all');
   const [broadcastText, setBroadcastText] = useState('');
@@ -902,7 +909,6 @@ export default function StaffDashboard() {
   };
 
   useEffect(() => {
-    setActiveRole('staff');
     fetchRooms(); fetchStats(); fetchAlerts(); fetchBroadcasts();
 
     // Real-time Firestore listeners

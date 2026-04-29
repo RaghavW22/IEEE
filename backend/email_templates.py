@@ -2,7 +2,7 @@ EMAIL_TEMPLATE = """
 <html><body style="font-family:Arial,sans-serif;background:#060e1a;color:#fff;padding:0;margin:0;">
   <div style="max-width:600px;margin:20px auto;background:#112240;border-radius:24px;overflow:hidden;border:1px solid #1e293b;">
     <div style="background:#1e3a8a;padding:20px;text-align:center;">
-       <h2 style="color:#60a5fa;margin:0;letter-spacing:2px;font-size:18px;">SAFEPATH MEDICAL CENTER</h2>
+       <h2 style="color:#60a5fa;margin:0;letter-spacing:2px;font-size:18px;">SAFEPATH: EMERGENCY RESPONSE SYSTEM </h2>
     </div>
     <img src="cid:facility_banner" alt="Hospital Facility" style="width:100%;height:240px;object-fit:cover;">
     <div style="padding:40px;">

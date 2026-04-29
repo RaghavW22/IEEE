@@ -1,12 +1,12 @@
-# SafePath Hospitality AI
+# SafePath: Emergency Response System
 
-An **AI-Powered Emergency Guidance System** for Hotels.
+An **AI-Powered Emergency Guidance System** for Hospitals.
 
-This project enhances guest safety and staff responsiveness during emergencies using real-time floor maps, broadcast communications, and dynamic SOS tools.
+This project enhances resident safety and staff responsiveness during emergencies using real-time floor maps, broadcast communications, and dynamic SOS tools.
 
 ## Features
-- **Guest Dashboard**: Accessed securely via QR code login. Provides dynamic routing, targeted announcements, and an emergency SOS panic button.
-- **Staff Dashboard**: Allows hotel staff to register guests with QR tokens, monitor real-time hotel occupancy, track active alarms, and broadcast instructions to specific floors or rooms.
+- **Citizen Dashboard**: Accessed securely via QR code login. Provides dynamic routing, targeted announcements, and an emergency SOS panic button.
+- **Community Lead Dashboard**: Allows staff to register residents with QR tokens, monitor real-time hospital occupancy, track active alarms, and broadcast instructions to specific floors or zones.
 - **Responder Portal**: Live situational awareness tracking for emergency first-responders.
 
 ## Tech Stack
