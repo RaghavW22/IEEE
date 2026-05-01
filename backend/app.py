@@ -24,10 +24,7 @@ app = Flask(__name__)
 CORS(app)
 
 from email_templates import EMAIL_TEMPLATE
-
-
 # ─── Rooms ────────────────────────────────────────────────────────────────────
-
 @app.route('/api/rooms', methods=['GET'])
 def get_rooms():
     try:
@@ -357,18 +354,20 @@ def delete_broadcast(broadcast_id):
 @app.route('/api/broadcasts', methods=['DELETE'])
 def clear_all_broadcasts():
     try:
-        # Delete all broadcasts — use a filter that matches everything
-        delete("broadcasts", {"id": "neq."})
-    except: pass
+        # Delete all broadcasts — 'not.is.null' matches every row that has an ID
+        delete("broadcasts", {"id": "not.is.null"})
+    except Exception as e:
+        print(f"Clear broadcasts error: {e}")
+        return jsonify({'error': str(e)}), 500
     return jsonify({'success': True})
 
 @app.route('/api/clear-trials', methods=['DELETE'])
 def clear_trials():
     try:
-        delete("broadcasts", {"id": "neq."})
-        delete("alerts", {"id": "neq."})
-        delete("checkins", {"id": "neq."})
-        delete("danger_zones", {"room_id": "neq."})
+        delete("broadcasts", {"id": "not.is.null"})
+        delete("alerts", {"id": "not.is.null"})
+        delete("checkins", {"id": "not.is.null"})
+        delete("danger_zones", {"room_id": "not.is.null"})
 
         # Reset all rooms
         rooms = select("rooms")
